@@ -2,6 +2,10 @@
 
 ## next
 
+- 电子书暗黑模式：插图里的白纸会换成页面底色，线条留在背景上。彩色线条保持原色，黑线改成正文色。照片没有大块纸色时不动。
+  Dark theme for ebooks: the white paper inside an illustration becomes the page background, so the drawing sits on the page. Colored ink stays; black ink is drawn in the text color. A photograph without a paper mat is left as it is.
+- 扫描页 OCR 之后复制选中文字会进剪贴板。段落合并复制以前只在遇到换行标记时才写出文字，选区末尾那一段（常常是整段）被丢掉，剪贴板因此是空的。
+  Copying a text selection on an OCR'd scan puts the text on the clipboard. Paragraph-merged copy used to emit text only at a line-break marker, so the tail of the selection (often the whole selection) was dropped and the clipboard stayed empty.
 - 提取目录、校准书签时，书签栏底部不再露出一块白底。校准条还没出现时不再给它留空。
   While bookmarks are being calibrated, the sidebar no longer shows a white strip at the bottom. That space is reserved only once the calibration bar is visible.
 - 对准印刷目录：页差显示完整数字（`+199` 不再被截成 `+1...`）。页脚页码和当前页相同、或大于 400 时仍保留。隔得很远的页面上重复出现的同一个数字（页眉）不再当成印刷页。

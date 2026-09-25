@@ -10,6 +10,9 @@ void fz_purge_stored_html(fz_context* ctx, void* doc);
 void fz_purge_stored_html_chapter(fz_context* ctx, void* doc, int chapter);
 void fz_reset_epub_html_font_set(fz_context* ctx, fz_document* doc);
 void fz_htdoc_reparse_html(fz_context* ctx, fz_document* doc, fz_buffer* buf, float w, float h, float em);
+typedef fz_image* (*fz_html_recolor_image_fn)(fz_context* ctx, fz_image* image);
+void fz_html_set_recolor_image_fn(fz_html_recolor_image_fn fn);
+fz_image* EbookRecolorReflowImage(fz_context* ctx, fz_image* image);
 }
 
 #include "utils/BaseUtil.h"
@@ -41,6 +44,7 @@ void fz_htdoc_reparse_html(fz_context* ctx, fz_document* doc, fz_buffer* buf, fl
 #include "EbookFontConfig.h"
 #include "EbookTypography.h"
 #include "EbookDoc.h"
+#include "EbookImagePaper.h"
 #include "EpubMeta.h"
 #include "EpubPerfLog.h"
 #include "SumatraConfig.h"
@@ -5628,6 +5632,175 @@ p.picture > img, p.picture1 > img {
 // mupdf 1.28: per-document styling via fz_style_document (replaces global
 // fz_set_user_css / fz_set_use_document_css). Must run after the document is
 // opened and before fz_layout_document / reparse.
+static bool EbookDarkPaperKnockoutActive() {
+    if (!IsDarkThemeSelected()) {
+        return false;
+    }
+    if (GetPdfDocumentColorMode() == PdfDocumentColorMode::Light) {
+        return false;
+    }
+    // Eye-care light uses a different bitmap path. Dark reflow uses CSS, and
+    // this knockout is the image half of that palette.
+    return !ReflowEbookUsesThemeBitmapRecolor();
+}
+
+struct EbookPaperCacheEntry {
+    fz_image* src = nullptr;
+    fz_image* dst = nullptr;
+    u32 key = 0;
+    bool used = false;
+};
+
+static EbookPaperCacheEntry gEbookPaperCache[24];
+static int gEbookPaperCacheClock = 0;
+static CRITICAL_SECTION gEbookPaperCs;
+static bool gEbookPaperCsReady = false;
+
+static void EnsureEbookPaperCacheLock() {
+    if (!gEbookPaperCsReady) {
+        InitializeCriticalSection(&gEbookPaperCs);
+        gEbookPaperCsReady = true;
+    }
+}
+
+static u32 EbookPaperColorKey() {
+    COLORREF bg = 0;
+    COLORREF text = ThemePageRenderColors(bg, true);
+    return (u32)bg ^ ((u32)text << 1);
+}
+
+static int EbookPaperCacheLookup(fz_context* ctx, fz_image* src, u32 key, fz_image** out) {
+    *out = nullptr;
+    for (int i = 0; i < dimof(gEbookPaperCache); i++) {
+        EbookPaperCacheEntry* e = &gEbookPaperCache[i];
+        if (!e->used || e->src != src || e->key != key) {
+            continue;
+        }
+        if (e->dst) {
+            *out = fz_keep_image(ctx, e->dst);
+            return 2;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static void EbookPaperCacheDropEntry(fz_context* ctx, EbookPaperCacheEntry* e) {
+    fz_drop_image(ctx, e->src);
+    fz_drop_image(ctx, e->dst);
+    e->src = nullptr;
+    e->dst = nullptr;
+    e->used = false;
+    e->key = 0;
+}
+
+static void EbookPaperCacheDropOtherKeys(fz_context* ctx, u32 key) {
+    for (int i = 0; i < dimof(gEbookPaperCache); i++) {
+        EbookPaperCacheEntry* e = &gEbookPaperCache[i];
+        if (e->used && e->key != key) {
+            EbookPaperCacheDropEntry(ctx, e);
+        }
+    }
+}
+
+static void EbookPaperCacheStore(fz_context* ctx, fz_image* src, fz_image* dst, u32 key) {
+    for (int i = 0; i < dimof(gEbookPaperCache); i++) {
+        EbookPaperCacheEntry* e = &gEbookPaperCache[i];
+        if (e->used && e->src == src && e->key == key) {
+            return;
+        }
+    }
+    int slot = -1;
+    for (int i = 0; i < dimof(gEbookPaperCache); i++) {
+        if (!gEbookPaperCache[i].used) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        slot = gEbookPaperCacheClock % dimof(gEbookPaperCache);
+        gEbookPaperCacheClock++;
+        EbookPaperCacheDropEntry(ctx, &gEbookPaperCache[slot]);
+    }
+    EbookPaperCacheEntry* e = &gEbookPaperCache[slot];
+    e->src = fz_keep_image(ctx, src);
+    e->dst = dst ? fz_keep_image(ctx, dst) : nullptr;
+    e->key = key;
+    e->used = true;
+}
+
+extern "C" fz_image* EbookRecolorReflowImage(fz_context* ctx, fz_image* src) {
+    if (!ctx || !src || !EbookDarkPaperKnockoutActive()) {
+        return nullptr;
+    }
+    EnsureEbookPaperCacheLock();
+    u32 key = EbookPaperColorKey();
+
+    EnterCriticalSection(&gEbookPaperCs);
+    EbookPaperCacheDropOtherKeys(ctx, key);
+    fz_image* cached = nullptr;
+    int hit = EbookPaperCacheLookup(ctx, src, key, &cached);
+    LeaveCriticalSection(&gEbookPaperCs);
+    if (hit == 1) {
+        return nullptr;
+    }
+    if (hit == 2) {
+        return cached;
+    }
+
+    fz_pixmap* pix = nullptr;
+    fz_pixmap* rgb = nullptr;
+    fz_image* made = nullptr;
+    fz_var(pix);
+    fz_var(rgb);
+    fz_var(made);
+    fz_try(ctx) {
+        pix = fz_get_pixmap_from_image(ctx, src, nullptr, nullptr, nullptr, nullptr);
+        if (pix && pix->w >= 2 && pix->h >= 2 && pix->w <= 8000 && pix->h <= 8000) {
+            rgb = fz_convert_pixmap(ctx, pix, fz_device_rgb(ctx), nullptr, nullptr, fz_default_color_params, 1);
+            if (rgb && (rgb->n == 3 || rgb->n == 4) && rgb->stride <= 0x7fffffff) {
+                COLORREF bg = 0;
+                COLORREF text = ThemePageRenderColors(bg, true);
+                EbookPaperColors colors;
+                colors.bgR = GetRValue(bg);
+                colors.bgG = GetGValue(bg);
+                colors.bgB = GetBValue(bg);
+                colors.textR = GetRValue(text);
+                colors.textG = GetGValue(text);
+                colors.textB = GetBValue(text);
+                if (EbookKnockoutPaperBackground(rgb->samples, rgb->w, rgb->h, rgb->n, (int)rgb->stride, colors)) {
+                    fz_image* mask = (src->mask && !src->mask->mask) ? src->mask : nullptr;
+                    made = fz_new_image_from_pixmap(ctx, rgb, mask);
+                }
+            }
+        }
+    }
+    fz_always(ctx) {
+        fz_drop_pixmap(ctx, rgb);
+        fz_drop_pixmap(ctx, pix);
+    }
+    fz_catch(ctx) {
+        fz_report_error(ctx);
+        return nullptr;
+    }
+
+    EnterCriticalSection(&gEbookPaperCs);
+    EbookPaperCacheStore(ctx, src, made, key);
+    LeaveCriticalSection(&gEbookPaperCs);
+    return made;
+}
+
+static void RegisterEbookPaperHook() {
+    EnsureEbookPaperCacheLock();
+    fz_html_set_recolor_image_fn(EbookRecolorReflowImage);
+}
+
+struct EbookPaperHookRegistration {
+    EbookPaperHookRegistration() { RegisterEbookPaperHook(); }
+};
+
+static EbookPaperHookRegistration gEbookPaperHookRegistration;
+
 static void StyleMupdfReflowDocument(fz_context* ctx, fz_document* doc, const char* nameHint, const char* filePath,
                                      float ldx, float ldy, float lfontDy, int displayDpi) {
     if (!doc) {

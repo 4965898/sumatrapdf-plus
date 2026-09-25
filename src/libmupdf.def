@@ -970,6 +970,7 @@ EXPORTS
 	fz_open_accelerated_document_with_stream
 	fz_user_css
 	fz_htdoc_reparse_html
+	fz_html_set_recolor_image_fn
 	fz_purge_stored_html
 	fz_purge_stored_html_chapter
 	fz_reset_epub_html_font_set

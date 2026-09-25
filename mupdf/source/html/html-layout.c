@@ -24,6 +24,33 @@
 #include "mupdf/ucdn.h"
 #include "html-imp.h"
 
+/* Sumatra: dark-theme EPUB images. NULL keeps the original image.
+   A returned image is owned by the caller. */
+typedef fz_image* (*fz_html_recolor_image_fn)(fz_context* ctx, fz_image* image);
+static fz_html_recolor_image_fn g_html_recolor_image;
+
+void fz_html_set_recolor_image_fn(fz_html_recolor_image_fn fn) {
+    g_html_recolor_image = fn;
+}
+
+static void html_fill_image(fz_context* ctx, fz_device* dev, fz_image* image, fz_matrix itm, float alpha) {
+    fz_image* recolored = NULL;
+
+    fz_var(recolored);
+    if (g_html_recolor_image && image) {
+        recolored = g_html_recolor_image(ctx, image);
+    }
+    fz_try(ctx) {
+        fz_fill_image(ctx, dev, recolored ? recolored : image, itm, alpha, fz_default_color_params);
+    }
+    fz_always(ctx) {
+        fz_drop_image(ctx, recolored);
+    }
+    fz_catch(ctx) {
+        fz_rethrow(ctx);
+    }
+}
+
 #include "hb.h"
 #include "hb-ft.h"
 #include <ft2build.h>
@@ -3609,7 +3636,7 @@ static int draw_flow_box(fz_context* ctx, fz_html_box* box, float page_top, floa
                     float alpha = style->color.a / 255.0f;
                     fz_matrix itm = fz_pre_translate(ctm, node->x, node->y - page_top);
                     itm = fz_pre_scale(itm, node->w, node->h);
-                    fz_fill_image(ctx, dev, node->content.image, itm, alpha, fz_default_color_params);
+                    html_fill_image(ctx, dev, node->content.image, itm, alpha);
                 }
             }
         }

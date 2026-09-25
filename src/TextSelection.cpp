@@ -1296,12 +1296,16 @@ static void AppendCachedOcrParagraphLines(TextSelection* ts, int pageNo, int fro
     }
     int segStart = fromGlyph;
     for (int i = fromGlyph; i <= toGlyph; i++) {
-        bool isBreak = i < toGlyph && text[i] == '\n' && !coords[i].x && !coords[i].dx;
-        if (!isBreak) {
+        bool atEnd = i == toGlyph;
+        bool isBreak = !atEnd && text[i] == '\n' && !coords[i].x && !coords[i].dx;
+        if (!isBreak && !atEnd) {
             continue;
         }
-        if (i > segStart) {
-            lines.Append(ToUtf8Temp(text + segStart, i - segStart));
+        // A drag rarely includes the invisible paragraph-break glyph, so the
+        // tail after the last break (often the whole selection) must be kept.
+        int segEnd = isBreak ? i : toGlyph;
+        if (segEnd > segStart) {
+            lines.Append(ToUtf8Temp(text + segStart, segEnd - segStart));
         }
         segStart = i + 1;
     }
