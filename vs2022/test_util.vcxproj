@@ -925,6 +925,7 @@
     <ClCompile Include="..\src\PrintedTocReconstruct.cpp" />
     <ClCompile Include="..\src\PdfDarkModeImageRules.cpp" />
     <ClCompile Include="..\src\PdfDarkModeOklab.cpp" />
+    <ClCompile Include="..\src\FaceLandmarkEngineNoOp.cpp" />
     <ClCompile Include="..\src\PdfTocEditModel.cpp" />
     <ClCompile Include="..\src\SumatraConfig.cpp" />
     <ClCompile Include="..\src\SumatraUnitTests.cpp" />
