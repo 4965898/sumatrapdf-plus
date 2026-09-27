@@ -1067,6 +1067,20 @@ const globalPrefs: Field[] = [
     ),
     "Valid values: original, theme. Legacy aliases smart, auto, black, light are still accepted on load.",
   ),
+  setDoc(
+    setVersion(
+      mkField(
+        "DocumentImageDarkStrategy",
+        Str,
+        "auto",
+        "how images are treated when a dark theme is on and document color mode is Match theme",
+      ),
+      "3.7",
+    ),
+    "Valid values: auto (classify each image), original (draw image pixels unchanged), " +
+      "simple (map white paper to the theme background and black ink to the theme text), " +
+      "tone (shift image colors toward the theme). Ignored for Original document color mode and for light themes.",
+  ),
   mkField(
     "TocDy",
     Int,
@@ -1283,6 +1297,17 @@ const globalPrefs: Field[] = [
         Str,
         null,
         "voice id of the English voice used by online smart bilingual Read Aloud; empty or unset means auto-pick best online English voice",
+      ),
+    ),
+    "3.7",
+  ),
+  setVersion(
+    setExpert(
+      mkField(
+        "ReadAloudMultilingualVoice",
+        Str,
+        null,
+        "voice id used by online multilingual Read Aloud; empty or unset means auto-pick the first multilingual voice",
       ),
     ),
     "3.7",

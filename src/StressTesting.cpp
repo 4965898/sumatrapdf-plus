@@ -32,6 +32,8 @@
 #include "SearchAndDDE.h"
 #include "StressTesting.h"
 #include "EpubPerfLog.h"
+#include "PdfDarkMode.h"
+#include "Theme.h"
 
 #include "utils/Log.h"
 
@@ -70,6 +72,22 @@ static bool IsFullRange(Vec<PageRange>& ranges) {
     return isFull;
 }
 
+static bool TonePerfRequested() {
+    return GetEnvironmentVariableA("SUMATRA_TONE_PERF", nullptr, 0) > 0;
+}
+
+static void TonePerfPreparePrefs() {
+    if (!TonePerfRequested() || !gGlobalPrefs) {
+        return;
+    }
+    // Dark theme + match document colors + smart invert. Does not write settings.
+    SetTheme("Dark-Dracula");
+    str::ReplaceWithCopy(&gGlobalPrefs->documentColorMode, "theme");
+    str::ReplaceWithCopy(&gGlobalPrefs->documentImageDarkStrategy, "tone");
+    logf("tone-perf theme=Dark-Dracula color=%s image=%s\n", gGlobalPrefs->documentColorMode,
+         gGlobalPrefs->documentImageDarkStrategy);
+}
+
 static void BenchLoadRender(EngineBase* engine, int pagenum) {
     auto t = TimeGet();
     bool ok = engine->BenchLoadPage(pagenum);
@@ -82,7 +100,14 @@ static void BenchLoadRender(EngineBase* engine, int pagenum) {
     logf("pageload   %3d: %.2f ms\n", pagenum, timeMs);
 
     t = TimeGet();
-    RenderPageArgs args(pagenum, 1.0, 0);
+    float zoom = TonePerfRequested() ? 1.6f : 1.0f;
+    DarkModeProfile darkProfile;
+    RenderPageArgs args(pagenum, zoom, 0);
+    if (TonePerfRequested()) {
+        BuildViewDarkModeProfile(engine, &darkProfile);
+        args.darkProfile = &darkProfile;
+        args.target = RenderTarget::View;
+    }
     RenderedBitmap* rendered = engine->RenderPage(args);
 
     if (!rendered) {
@@ -92,6 +117,17 @@ static void BenchLoadRender(EngineBase* engine, int pagenum) {
     delete rendered;
     timeMs = TimeSinceInMs(t);
     logf("pagerender %3d: %.2f ms\n", pagenum, timeMs);
+    if (TonePerfRequested()) {
+        t = TimeGet();
+        DarkModeProfile darkProfile2;
+        BuildViewDarkModeProfile(engine, &darkProfile2);
+        RenderPageArgs again(pagenum, zoom, 0);
+        again.darkProfile = &darkProfile2;
+        again.target = RenderTarget::View;
+        RenderedBitmap* second = engine->RenderPage(again);
+        delete second;
+        logf("pagerender2 %3d: %.2f ms\n", pagenum, TimeSinceInMs(t));
+    }
 
     // also time text extraction: this is what mouse-move hit-testing
     // (IsOverText) and selection trigger while reading
@@ -142,6 +178,7 @@ static void BenchFile(const char* path, const char* pagesSpec) {
     }
 
     auto total = TimeGet();
+    TonePerfPreparePrefs();
     logf("Starting: %s\n", path);
 
     auto t = TimeGet();
@@ -154,11 +191,18 @@ static void BenchFile(const char* path, const char* pagesSpec) {
     double timeMs = TimeSinceInMs(t);
     logf("load: %.2f ms\n", timeMs);
     // reflowable ebooks load progressively; wait for the full page count so
-    // benching pages near the end of large books works
-    while (EngineIsProgressiveEbookLoading(engine)) {
-        Sleep(50);
+    // benching pages near the end of large books works.
+    // Smart-invert timing only needs the first pages. Waiting out an anthology
+    // counts every chapter before any picture is graded.
+    if (TonePerfRequested()) {
+        logf("progressive still loading: %d, pages ready: %d\n", EngineIsProgressiveEbookLoading(engine) ? 1 : 0,
+             engine->PageCount());
+    } else {
+        while (EngineIsProgressiveEbookLoading(engine)) {
+            Sleep(50);
+        }
+        logf("progressive load done: %.2f ms\n", TimeSinceInMs(t));
     }
-    logf("progressive load done: %.2f ms\n", TimeSinceInMs(t));
     int pages = engine->PageCount();
     logf("page count: %d\n", pages);
 

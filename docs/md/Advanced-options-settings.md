@@ -232,6 +232,12 @@ LastLightTheme = Light-Warm
 ; still accepted on load. (introduced in version 3.7)
 DocumentColorMode = theme
 
+; Valid values: auto (classify each image), original (draw image pixels
+; unchanged), simple (map white paper to the theme background and black ink to
+; the theme text), tone (shift image colors toward the theme). Ignored for
+; Original document color mode and for light themes. (introduced in version 3.7)
+DocumentImageDarkStrategy = auto
+
 ; if both favorites and bookmarks parts of sidebar are visible, this is the
 ; height of bookmarks (table of contents) part
 TocDy = 0
@@ -622,6 +628,10 @@ ReadAloudSmartOnlineVoiceZh =
 ; voice id of the English voice used by online smart bilingual Read Aloud; empty
 ; or unset means auto-pick best online English voice (introduced in version 3.7)
 ReadAloudSmartOnlineVoiceEn =
+
+; voice id used by online multilingual Read Aloud; empty or unset means
+; auto-pick the first multilingual voice (introduced in version 3.7)
+ReadAloudMultilingualVoice =
 
 ; a whitespace separated list of passwords to try when opening a password
 ; protected document (passwords containing spaces must be quoted) (introduced in

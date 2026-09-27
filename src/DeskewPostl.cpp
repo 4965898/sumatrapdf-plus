@@ -52,7 +52,7 @@ static int OtsuThreshold(const u8* gray, int n) {
 }
 
 // Pack ink (dark) pixels as 1 bits. wpl = words per line.
-static u32* GrayTo1BitInk(const u8* gray, int w, int h, int thresh, int* outWpl) {
+static u32* GrayTo1BitInk(const u8* gray, int w, int h, int thresh, bool lightInk, int* outWpl) {
     int wpl = (w + 31) / 32;
     *outWpl = wpl;
     u32* bits = (u32*)calloc((size_t)wpl * h, sizeof(u32));
@@ -63,7 +63,7 @@ static u32* GrayTo1BitInk(const u8* gray, int w, int h, int thresh, int* outWpl)
         const u8* row = gray + y * w;
         u32* line = bits + y * wpl;
         for (int x = 0; x < w; x++) {
-            if (row[x] < thresh) {
+            if (lightInk ? row[x] > thresh : row[x] < thresh) {
                 line[x >> 5] |= (1u << (31 - (x & 31)));
             }
         }
@@ -150,18 +150,259 @@ static double DiffSquareSum(const int* sums, int h, int w) {
     return score;
 }
 
+// Vertical shear at 30°–60° slides the text out of the bitmap, so the score
+// never peaks. Rotate about the center instead. The small-angle form matches
+// VShear (src y ≈ y - tan(deg) * (x - cx)), which is the angle fz_rotate uses.
+static double ScoreRotatedLines(const u8* gray, int w, int h, float deg, bool lightInk, int thresh, u8* tmp) {
+    float rad = deg * (3.14159265f / 180.f);
+    float c = cosf(rad);
+    float s = sinf(rad);
+    float cx = (w - 1) * 0.5f;
+    float cy = (h - 1) * 0.5f;
+    u8 paper = lightInk ? 0 : 255;
+    memset(tmp, paper, (size_t)w * (size_t)h);
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            float dx = (float)x - cx;
+            float dy = (float)y - cy;
+            int sx = (int)(c * dx + s * dy + cx + 0.5f);
+            int sy = (int)(-s * dx + c * dy + cy + 0.5f);
+            if ((unsigned)sx < (unsigned)w && (unsigned)sy < (unsigned)h) {
+                tmp[(size_t)y * w + x] = gray[(size_t)sy * w + sx];
+            }
+        }
+    }
+    double score = 0;
+    int prev = -1;
+    int margin = h / 20;
+    if (margin < 1) {
+        margin = 1;
+    }
+    for (int y = margin; y < h - margin; y++) {
+        const u8* row = tmp + (size_t)y * w;
+        int ink = 0;
+        for (int x = 0; x < w; x++) {
+            if (lightInk ? row[x] > thresh : row[x] < thresh) {
+                ink++;
+            }
+        }
+        if (prev >= 0) {
+            double d = (double)ink - (double)prev;
+            score += d * d;
+        }
+        prev = ink;
+    }
+    return score;
+}
+
+// Short ink runs are glyph strokes, not rules. Upright hanzi are rich in
+// horizontal strokes. A page turned on its side has those strokes vertical.
+// Returns horizontal/vertical. Above 1 means the glyphs are already upright.
+static float UprightStrokeBias(const u8* gray, int w, int h, bool lightInk, int thresh) {
+    int step = (w * (i64)h > 500000) ? 2 : 1;
+    int hShort = 0;
+    int vShort = 0;
+    for (int y = 0; y < h; y += step) {
+        int run = 0;
+        const u8* row = gray + (size_t)y * w;
+        for (int x = 0; x < w; x += step) {
+            bool on = lightInk ? row[x] > thresh : row[x] < thresh;
+            if (on) {
+                run++;
+            } else {
+                if (run >= 2 && run <= 10) {
+                    hShort += run;
+                }
+                run = 0;
+            }
+        }
+    }
+    for (int x = 0; x < w; x += step) {
+        int run = 0;
+        for (int y = 0; y < h; y += step) {
+            u8 px = gray[(size_t)y * w + x];
+            bool on = lightInk ? px > thresh : px < thresh;
+            if (on) {
+                run++;
+            } else {
+                if (run >= 2 && run <= 10) {
+                    vShort += run;
+                }
+                run = 0;
+            }
+        }
+    }
+    if (vShort < 1) {
+        return 2.f;
+    }
+    return (float)hShort / (float)vShort;
+}
+
 DeskewPostlResult FindSkew(const unsigned char* gray, int w, int h) {
     DeskewPostlResult r{};
     if (!gray || w < 80 || h < 80) {
         return r;
     }
 
-    int thresh = OtsuThreshold(gray, w * h);
+    int nPix = w * h;
+    int thresh = OtsuThreshold(gray, nPix);
     if (thresh < 255) {
         thresh++;
     }
+    // A dark-theme render is white type on black. Those light glyphs are the lines.
+    i64 sumLum = 0;
+    for (int i = 0; i < nPix; i++) {
+        sumLum += gray[i];
+    }
+    bool lightInk = nPix > 0 && sumLum / nPix < 128;
+
+    // Coarse rotation search, ±70°. Shear cannot see a page photographed this far over.
+    int dw = w;
+    int dh = h;
+    const u8* rotSrc = gray;
+    u8* rotSmall = nullptr;
+    int side = w > h ? w : h;
+    if (side > 360) {
+        dw = (w * 360) / side;
+        dh = (h * 360) / side;
+        if (dw < 80) {
+            dw = 80;
+        }
+        if (dh < 80) {
+            dh = 80;
+        }
+        rotSmall = (u8*)malloc((size_t)dw * (size_t)dh);
+        if (rotSmall) {
+            for (int y = 0; y < dh; y++) {
+                int sy = (y * h) / dh;
+                u8* dst = rotSmall + (size_t)y * dw;
+                const u8* srcRow = gray + (size_t)sy * w;
+                for (int x = 0; x < dw; x++) {
+                    dst[x] = srcRow[(x * w) / dw];
+                }
+            }
+            rotSrc = rotSmall;
+        } else {
+            dw = w;
+            dh = h;
+        }
+    }
+    u8* rotTmp = (u8*)malloc((size_t)dw * (size_t)dh);
+    float rotBest = 0.f;
+    double rotBestScore = -1.0;
+    double rotScore0 = 0;
+    if (rotTmp) {
+        for (int i = 0; i <= 36; i++) {
+            float deg = -90.f + (float)i * 5.f;
+            double score = ScoreRotatedLines(rotSrc, dw, dh, deg, lightInk, thresh, rotTmp);
+            if (fabsf(deg) < 0.01f) {
+                rotScore0 = score;
+            }
+            if (score > rotBestScore) {
+                rotBestScore = score;
+                rotBest = deg;
+            }
+        }
+    }
+    if (rotTmp && fabsf(rotBest) > 8.f) {
+        float angles[32];
+        double scores[32];
+        int nAngles = 0;
+        double minScore = 1e300;
+        double maxScore = 0;
+        int maxIdx = 0;
+        for (float deg = rotBest - 6.f; deg <= rotBest + 6.f + 0.01f && nAngles < 32; deg += 1.f) {
+            angles[nAngles] = deg;
+            scores[nAngles] = ScoreRotatedLines(rotSrc, dw, dh, deg, lightInk, thresh, rotTmp);
+            if (scores[nAngles] > maxScore) {
+                maxScore = scores[nAngles];
+                maxIdx = nAngles;
+            }
+            if (scores[nAngles] < minScore) {
+                minScore = scores[nAngles];
+            }
+            nAngles++;
+        }
+        float lo = nAngles > 0 && maxIdx > 0 ? angles[maxIdx - 1] : rotBest;
+        float hi = nAngles > 0 && maxIdx < nAngles - 1 ? angles[maxIdx + 1] : rotBest;
+        float bestAngle = nAngles > 0 ? angles[maxIdx] : rotBest;
+        double bestScore = maxScore > 0 ? maxScore : rotBestScore;
+        for (int iter = 0; iter < 8 && nAngles >= 3; iter++) {
+            float midLo = (lo + bestAngle) * 0.5f;
+            float midHi = (bestAngle + hi) * 0.5f;
+            double scoreLo = ScoreRotatedLines(rotSrc, dw, dh, midLo, lightInk, thresh, rotTmp);
+            double scoreHi = ScoreRotatedLines(rotSrc, dw, dh, midHi, lightInk, thresh, rotTmp);
+            if (scoreLo > bestScore) {
+                hi = bestAngle;
+                bestAngle = midLo;
+                bestScore = scoreLo;
+            } else if (scoreHi > bestScore) {
+                lo = bestAngle;
+                bestAngle = midHi;
+                bestScore = scoreHi;
+            } else {
+                lo = midLo;
+                hi = midHi;
+            }
+        }
+        // A vertical table header or a vertical rule can outscore the body.
+        // If upright horizontal text is still a large share of the peak, the
+        // page is not sideways and not 竖排: measure the small skew around 0°.
+        bool horizontalBody = rotScore0 > 1.0 && rotScore0 > bestScore * 0.45;
+        float applied = bestAngle;
+        double confScore = bestScore;
+        double confMin = rotScore0;
+        if (horizontalBody) {
+            float fineBest = 0.f;
+            double fineScore = rotScore0;
+            double fineMin = rotScore0;
+            for (int i = -14; i <= 14; i++) {
+                float deg = (float)i * 0.5f;
+                double score = (i == 0) ? rotScore0 : ScoreRotatedLines(rotSrc, dw, dh, deg, lightInk, thresh, rotTmp);
+                if (score < fineMin) {
+                    fineMin = score;
+                }
+                if (score > fineScore) {
+                    fineScore = score;
+                    fineBest = deg;
+                }
+            }
+            applied = fineBest;
+            confScore = fineScore;
+            confMin = fineMin;
+            bestScore = fineScore;
+        } else if (fabsf(bestAngle) > 45.f) {
+            // Upright 竖排: stand the columns up. Sideways glyphs (horizontal
+            // strokes turned vertical, and no real horizontal body) take the
+            // quarter turn.
+            float sign = bestAngle >= 0.f ? 1.f : -1.f;
+            float bias = UprightStrokeBias(gray, w, h, lightInk, thresh);
+            bool sideways = fabsf(bestAngle) >= 75.f && bias < 0.85f;
+            if (sideways) {
+                applied = sign * 90.f;
+            } else {
+                applied = bestAngle - sign * 90.f;
+            }
+        }
+        free(rotTmp);
+        free(rotSmall);
+        (void)confScore;
+        float improvement = (rotScore0 > 1.0) ? (float)((bestScore - rotScore0) / rotScore0) : 0.f;
+        r.ok = true;
+        r.angleDeg = applied;
+        if (horizontalBody && confMin > 1.0) {
+            r.confidence = (float)(bestScore / confMin);
+        } else {
+            r.confidence = (rotScore0 > 1.0) ? (float)(bestScore / rotScore0) : 0.f;
+        }
+        r.improvement = improvement;
+        return r;
+    }
+    free(rotTmp);
+    free(rotSmall);
+
     int wpl = 0;
-    u32* bits = GrayTo1BitInk(gray, w, h, thresh, &wpl);
+    u32* bits = GrayTo1BitInk(gray, w, h, thresh, lightInk, &wpl);
     if (!bits) {
         return r;
     }
@@ -180,17 +421,8 @@ DeskewPostlResult FindSkew(const unsigned char* gray, int w, int h) {
         return r;
     }
 
-    constexpr float kSweepRange = 7.f;
-    constexpr float kSweepDelta = 1.f;
+    // Nearly upright pages keep the ±7° shear sweep. Large tilts already returned above.
     constexpr float kDeg2Rad = 3.14159265f / 180.f;
-    int nAngles = (int)((2.f * kSweepRange) / kSweepDelta) + 1;
-    if (nAngles < 3 || nAngles > 64) {
-        free(reduced);
-        return r;
-    }
-
-    float angles[64];
-    double scores[64];
     int* sums = new int[rh2];
     u32* sheared = (u32*)calloc((size_t)rwpl2 * rh2, sizeof(u32));
     if (!sheared) {
@@ -199,25 +431,38 @@ DeskewPostlResult FindSkew(const unsigned char* gray, int w, int h) {
         return r;
     }
 
-    double maxScore = 0;
-    double minScore = 1e300;
-    int maxIdx = 0;
-    double score0 = 0;
-    for (int i = 0; i < nAngles; i++) {
-        angles[i] = -kSweepRange + i * kSweepDelta;
-        VShear1Bit(reduced, sheared, rw2, rh2, rwpl2, angles[i] * kDeg2Rad);
+    auto scoreAt = [&](float deg) -> double {
+        VShear1Bit(reduced, sheared, rw2, rh2, rwpl2, deg * kDeg2Rad);
         RowSums(sheared, rh2, rwpl2, sums);
-        scores[i] = DiffSquareSum(sums, rh2, rw2);
-        if (scores[i] > maxScore) {
-            maxScore = scores[i];
-            maxIdx = i;
+        return DiffSquareSum(sums, rh2, rw2);
+    };
+
+    float sweepLo = -7.f;
+    float sweepHi = 7.f;
+    float angles[32];
+    double scores[32];
+    int nAngles = 0;
+    double minScore = 1e300;
+    double maxScore = 0;
+    int maxIdx = 0;
+    double score0 = scoreAt(0.f);
+    for (float deg = sweepLo; deg <= sweepHi + 0.01f && nAngles < 32; deg += 1.f) {
+        angles[nAngles] = deg;
+        scores[nAngles] = (fabsf(deg) < 0.01f) ? score0 : scoreAt(deg);
+        if (scores[nAngles] > maxScore) {
+            maxScore = scores[nAngles];
+            maxIdx = nAngles;
         }
-        if (scores[i] < minScore) {
-            minScore = scores[i];
+        if (scores[nAngles] < minScore) {
+            minScore = scores[nAngles];
         }
-        if (angles[i] > -0.01f && angles[i] < 0.01f) {
-            score0 = scores[i];
-        }
+        nAngles++;
+    }
+    if (nAngles < 3) {
+        free(sheared);
+        delete[] sums;
+        free(reduced);
+        return r;
     }
 
     // Binary-search refinement around the coarse peak (Leptonica search stage).
@@ -228,12 +473,8 @@ DeskewPostlResult FindSkew(const unsigned char* gray, int w, int h) {
     for (int iter = 0; iter < 12; iter++) {
         float midLo = (lo + bestAngle) * 0.5f;
         float midHi = (bestAngle + hi) * 0.5f;
-        VShear1Bit(reduced, sheared, rw2, rh2, rwpl2, midLo * kDeg2Rad);
-        RowSums(sheared, rh2, rwpl2, sums);
-        double scoreLo = DiffSquareSum(sums, rh2, rw2);
-        VShear1Bit(reduced, sheared, rw2, rh2, rwpl2, midHi * kDeg2Rad);
-        RowSums(sheared, rh2, rwpl2, sums);
-        double scoreHi = DiffSquareSum(sums, rh2, rw2);
+        double scoreLo = scoreAt(midLo);
+        double scoreHi = scoreAt(midHi);
         if (scoreLo > bestScore) {
             hi = bestAngle;
             bestAngle = midLo;
@@ -252,6 +493,7 @@ DeskewPostlResult FindSkew(const unsigned char* gray, int w, int h) {
     delete[] sums;
     free(reduced);
 
+    // Confidence is local to the fine window. A ±45° global min would make every page look certain.
     float conf = (minScore > 1.0) ? (float)(bestScore / minScore) : 0.f;
     float improvement = (score0 > 1.0) ? (float)((bestScore - score0) / score0) : 0.f;
     if (improvement < 0.05f && fabsf(bestAngle) < 0.6f) {

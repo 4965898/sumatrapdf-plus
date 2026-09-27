@@ -10,9 +10,6 @@ void fz_purge_stored_html(fz_context* ctx, void* doc);
 void fz_purge_stored_html_chapter(fz_context* ctx, void* doc, int chapter);
 void fz_reset_epub_html_font_set(fz_context* ctx, fz_document* doc);
 void fz_htdoc_reparse_html(fz_context* ctx, fz_document* doc, fz_buffer* buf, float w, float h, float em);
-typedef fz_image* (*fz_html_recolor_image_fn)(fz_context* ctx, fz_image* image);
-void fz_html_set_recolor_image_fn(fz_html_recolor_image_fn fn);
-fz_image* EbookRecolorReflowImage(fz_context* ctx, fz_image* image);
 }
 
 #include "utils/BaseUtil.h"
@@ -37,6 +34,7 @@ fz_image* EbookRecolorReflowImage(fz_context* ctx, fz_image* image);
 #include "OfficeConvert.h"
 #include "WordToc.h"
 #include "EngineMupdf.h"
+#include "EpubFlattenedCutout.h"
 #include "EngineAll.h"
 #include "DeskewPostl.h"
 #include "PdfTocEditModel.h"
@@ -44,7 +42,6 @@ fz_image* EbookRecolorReflowImage(fz_context* ctx, fz_image* image);
 #include "EbookFontConfig.h"
 #include "EbookTypography.h"
 #include "EbookDoc.h"
-#include "EbookImagePaper.h"
 #include "EpubMeta.h"
 #include "EpubPerfLog.h"
 #include "SumatraConfig.h"
@@ -5632,175 +5629,6 @@ p.picture > img, p.picture1 > img {
 // mupdf 1.28: per-document styling via fz_style_document (replaces global
 // fz_set_user_css / fz_set_use_document_css). Must run after the document is
 // opened and before fz_layout_document / reparse.
-static bool EbookDarkPaperKnockoutActive() {
-    if (!IsDarkThemeSelected()) {
-        return false;
-    }
-    if (GetPdfDocumentColorMode() == PdfDocumentColorMode::Light) {
-        return false;
-    }
-    // Eye-care light uses a different bitmap path. Dark reflow uses CSS, and
-    // this knockout is the image half of that palette.
-    return !ReflowEbookUsesThemeBitmapRecolor();
-}
-
-struct EbookPaperCacheEntry {
-    fz_image* src = nullptr;
-    fz_image* dst = nullptr;
-    u32 key = 0;
-    bool used = false;
-};
-
-static EbookPaperCacheEntry gEbookPaperCache[24];
-static int gEbookPaperCacheClock = 0;
-static CRITICAL_SECTION gEbookPaperCs;
-static bool gEbookPaperCsReady = false;
-
-static void EnsureEbookPaperCacheLock() {
-    if (!gEbookPaperCsReady) {
-        InitializeCriticalSection(&gEbookPaperCs);
-        gEbookPaperCsReady = true;
-    }
-}
-
-static u32 EbookPaperColorKey() {
-    COLORREF bg = 0;
-    COLORREF text = ThemePageRenderColors(bg, true);
-    return (u32)bg ^ ((u32)text << 1);
-}
-
-static int EbookPaperCacheLookup(fz_context* ctx, fz_image* src, u32 key, fz_image** out) {
-    *out = nullptr;
-    for (int i = 0; i < dimof(gEbookPaperCache); i++) {
-        EbookPaperCacheEntry* e = &gEbookPaperCache[i];
-        if (!e->used || e->src != src || e->key != key) {
-            continue;
-        }
-        if (e->dst) {
-            *out = fz_keep_image(ctx, e->dst);
-            return 2;
-        }
-        return 1;
-    }
-    return 0;
-}
-
-static void EbookPaperCacheDropEntry(fz_context* ctx, EbookPaperCacheEntry* e) {
-    fz_drop_image(ctx, e->src);
-    fz_drop_image(ctx, e->dst);
-    e->src = nullptr;
-    e->dst = nullptr;
-    e->used = false;
-    e->key = 0;
-}
-
-static void EbookPaperCacheDropOtherKeys(fz_context* ctx, u32 key) {
-    for (int i = 0; i < dimof(gEbookPaperCache); i++) {
-        EbookPaperCacheEntry* e = &gEbookPaperCache[i];
-        if (e->used && e->key != key) {
-            EbookPaperCacheDropEntry(ctx, e);
-        }
-    }
-}
-
-static void EbookPaperCacheStore(fz_context* ctx, fz_image* src, fz_image* dst, u32 key) {
-    for (int i = 0; i < dimof(gEbookPaperCache); i++) {
-        EbookPaperCacheEntry* e = &gEbookPaperCache[i];
-        if (e->used && e->src == src && e->key == key) {
-            return;
-        }
-    }
-    int slot = -1;
-    for (int i = 0; i < dimof(gEbookPaperCache); i++) {
-        if (!gEbookPaperCache[i].used) {
-            slot = i;
-            break;
-        }
-    }
-    if (slot < 0) {
-        slot = gEbookPaperCacheClock % dimof(gEbookPaperCache);
-        gEbookPaperCacheClock++;
-        EbookPaperCacheDropEntry(ctx, &gEbookPaperCache[slot]);
-    }
-    EbookPaperCacheEntry* e = &gEbookPaperCache[slot];
-    e->src = fz_keep_image(ctx, src);
-    e->dst = dst ? fz_keep_image(ctx, dst) : nullptr;
-    e->key = key;
-    e->used = true;
-}
-
-extern "C" fz_image* EbookRecolorReflowImage(fz_context* ctx, fz_image* src) {
-    if (!ctx || !src || !EbookDarkPaperKnockoutActive()) {
-        return nullptr;
-    }
-    EnsureEbookPaperCacheLock();
-    u32 key = EbookPaperColorKey();
-
-    EnterCriticalSection(&gEbookPaperCs);
-    EbookPaperCacheDropOtherKeys(ctx, key);
-    fz_image* cached = nullptr;
-    int hit = EbookPaperCacheLookup(ctx, src, key, &cached);
-    LeaveCriticalSection(&gEbookPaperCs);
-    if (hit == 1) {
-        return nullptr;
-    }
-    if (hit == 2) {
-        return cached;
-    }
-
-    fz_pixmap* pix = nullptr;
-    fz_pixmap* rgb = nullptr;
-    fz_image* made = nullptr;
-    fz_var(pix);
-    fz_var(rgb);
-    fz_var(made);
-    fz_try(ctx) {
-        pix = fz_get_pixmap_from_image(ctx, src, nullptr, nullptr, nullptr, nullptr);
-        if (pix && pix->w >= 2 && pix->h >= 2 && pix->w <= 8000 && pix->h <= 8000) {
-            rgb = fz_convert_pixmap(ctx, pix, fz_device_rgb(ctx), nullptr, nullptr, fz_default_color_params, 1);
-            if (rgb && (rgb->n == 3 || rgb->n == 4) && rgb->stride <= 0x7fffffff) {
-                COLORREF bg = 0;
-                COLORREF text = ThemePageRenderColors(bg, true);
-                EbookPaperColors colors;
-                colors.bgR = GetRValue(bg);
-                colors.bgG = GetGValue(bg);
-                colors.bgB = GetBValue(bg);
-                colors.textR = GetRValue(text);
-                colors.textG = GetGValue(text);
-                colors.textB = GetBValue(text);
-                if (EbookKnockoutPaperBackground(rgb->samples, rgb->w, rgb->h, rgb->n, (int)rgb->stride, colors)) {
-                    fz_image* mask = (src->mask && !src->mask->mask) ? src->mask : nullptr;
-                    made = fz_new_image_from_pixmap(ctx, rgb, mask);
-                }
-            }
-        }
-    }
-    fz_always(ctx) {
-        fz_drop_pixmap(ctx, rgb);
-        fz_drop_pixmap(ctx, pix);
-    }
-    fz_catch(ctx) {
-        fz_report_error(ctx);
-        return nullptr;
-    }
-
-    EnterCriticalSection(&gEbookPaperCs);
-    EbookPaperCacheStore(ctx, src, made, key);
-    LeaveCriticalSection(&gEbookPaperCs);
-    return made;
-}
-
-static void RegisterEbookPaperHook() {
-    EnsureEbookPaperCacheLock();
-    fz_html_set_recolor_image_fn(EbookRecolorReflowImage);
-}
-
-struct EbookPaperHookRegistration {
-    EbookPaperHookRegistration() { RegisterEbookPaperHook(); }
-};
-
-static EbookPaperHookRegistration gEbookPaperHookRegistration;
-
 static void StyleMupdfReflowDocument(fz_context* ctx, fz_document* doc, const char* nameHint, const char* filePath,
                                      float ldx, float ldy, float lfontDy, int displayDpi) {
     if (!doc) {
@@ -8201,7 +8029,9 @@ TocItem* EngineMupdf::BuildTocTree(TocItem* parent, fz_outline* outline, int& id
         }
 
         int pageNo = OutlinePageNoForItem(nullptr, outline, outlineIdx);
-        outlineIdx++;
+        // One step per outline node, same order as EngineMupdfCollectOutlineTocMeta.
+        // Stepping twice made later entries read another book's page (anthology
+        // EPUBs: 维京传奇's title page jumped to 失落的古城).
         outlineIdx++;
 
         IPageDestination* dest = nullptr;
@@ -9471,6 +9301,7 @@ static void BuildPageDarkLegacySkipRects(EngineMupdf* engine, FzPageInfo* pageIn
     }
 
     // Whole-tile bitmap recolor: skip only photo interiors on Image Conversion picture books.
+    // Do not skip the whole image — that also skips the white margin and the caption.
     if (preserveAllImageColors && FollowThemePageUsesBitmapRecolor(engine, ctx, pageInfo, page)) {
         if (engine->pdfdoc && PdfDarkModePdfMetadataSuggestsImageConversionPictureBook(ctx, engine->pdfdoc)) {
             fz_matrix ctm = engine->viewctm(page, zoom, rotation);
@@ -10298,7 +10129,14 @@ static bool FollowThemeWholeTileBitmapBlockedForPaperScan(fz_context* ctx, Engin
             continue;
         }
         DarkImageAnalysis analysis = PdfDarkModeAnalyzeImage(ctx, image, coverage, true);
+        // A color photograph on a white page (RAZ "The farmer") can look like a
+        // tinted text scan in the thumbnail. Government-paper binarize then keeps
+        // only the red apples and flattens the leaves and clothes.
+        bool stayOriginal = PdfDarkModeImageShouldStayOriginal(ctx, image);
         fz_drop_image(ctx, image);
+        if (stayOriginal) {
+            continue;
+        }
         // Gray photocopies: thumbnail lumVar ~0.001 (sparse ink) vs ~0.012 (more gray
         // table ink) flips FullPageTextScanForBinarize. Hard binarize is bright and
         // aliased; UpdateBitmapColors is dimmer but smooth. Keep one look per file.
@@ -10314,8 +10152,9 @@ static bool FollowThemeWholeTileBitmapBlockedForPaperScan(fz_context* ctx, Engin
         fz_image* dominant = FollowThemePageDominantBleedImage(ctx, engine, pageInfo, page, 0.50f);
         if (dominant) {
             DarkImageAnalysis analysis = PdfDarkModeAnalyzeImage(ctx, dominant, 0.97f, true);
+            bool stayOriginal = PdfDarkModeImageShouldStayOriginal(ctx, dominant);
             bool textScan = PdfDarkModeFeaturesLookLikeFullPageTextScanForBinarize(analysis.features);
-            if (textScan &&
+            if (!stayOriginal && textScan &&
                 (analysis.features.saturatedPixelRatio >= 0.06f || analysis.features.chromaticPixelRatio >= 0.08f)) {
                 block = true;
             }
@@ -10328,10 +10167,29 @@ static bool FollowThemeWholeTileBitmapBlockedForPaperScan(fz_context* ctx, Engin
 
 static bool FollowThemePageUsesBitmapRecolor(EngineMupdf* engine, fz_context* ctx, FzPageInfo* pageInfo,
                                              fz_page* page) {
+    // Keep Original has to reach fill_image so a scan is not recolored.
+    // Smart invert on a text scan is the same page binarize as Auto. Sending
+    // that scan through fill_image decodes the native image and runs face
+    // detection, which is why official-document PDFs open slowly.
+    if (GetPdfImageDarkStrategy() == PdfImageDarkStrategy::Original) {
+        return false;
+    }
     // Adobe Image Conversion picture books (RAZ-Z): per-image picture-book remap + photo-rect
     // protect — whole-tile bitmap recolor inverts B&W portraits even with skip rects.
     if (engine->pdfdoc && PdfDarkModePdfMetadataSuggestsImageConversionPictureBook(ctx, engine->pdfdoc)) {
         return false;
+    }
+    // A photograph must take the per-image path: white-margin flood, photo kept.
+    // Whole-tile recolor either paints the birds red or, if the rect is skipped, leaves the page white.
+    {
+        fz_image* dominant = FollowThemePageDominantBleedImage(ctx, engine, pageInfo, page, 0.12f);
+        if (dominant) {
+            bool photo = PdfDarkModeImageShouldStayOriginal(ctx, dominant);
+            fz_drop_image(ctx, dominant);
+            if (photo) {
+                return false;
+            }
+        }
     }
     if (engine->followThemeDocBitmapRecolor == 1) {
         CacheLaTeXFollowThemePageProbe(engine, ctx, pageInfo, page, nullptr);
@@ -10427,6 +10285,9 @@ static bool FollowThemePageUsesBitmapRecolor(EngineMupdf* engine, fz_context* ct
 // "Please wait - rendering...".
 static bool FollowThemePageShouldRasterizeThenRecolor(EngineMupdf* engine, fz_context* ctx, FzPageInfo* pageInfo,
                                                       fz_page* page) {
+    if (GetPdfImageDarkStrategy() == PdfImageDarkStrategy::Original) {
+        return false;
+    }
     if (FollowThemePageUsesBitmapRecolor(engine, ctx, pageInfo, page)) {
         return true;
     }
@@ -10663,7 +10524,9 @@ static bool TryAgreedRuleSkewDeg(BitmapPixels* bp, float* outDeg) {
 // Uncertain == NoDeskew. Thresholds are centralized.
 // ---------------------------------------------------------------------------
 static constexpr float kDeskewDeadZoneDeg = 0.30f;
-static constexpr float kDeskewMaxAutoDeg = 7.f;
+// Photographs and badly placed scans can sit well past a paper-feed skew.
+// Above this, the winner is usually 竖排 columns or a quarter-turn, not skew.
+static constexpr float kDeskewMaxAutoDeg = 90.f;
 // Leptonica MinAllowedConfidence is 3.0; 2.6 keeps more true skews while
 // still rejecting flat score curves on upright pages.
 static constexpr float kDeskewMinConfidence = 2.6f;
@@ -10794,15 +10657,18 @@ static void EstimateBitmapSkewCandidate(BitmapPixels* bp, DeskewEstimateResult* 
         nValid++;
     }
     if (nValid >= 2) {
+        // A 30° page still agrees across bands, but shear clipping moves the
+        // estimate by a degree or two. The tight 0.75° cap is for small skew.
+        float spread = fabsf(whole.angleDeg) > 7.f ? 3.f : kDeskewRegionalMaxSpread;
         float meanDiff = sumAbsDiff / (float)nValid;
-        float regional = 1.f - meanDiff / kDeskewRegionalMaxSpread;
+        float regional = 1.f - meanDiff / spread;
         if (regional < 0.f) {
             regional = 0.f;
         }
         if (regional > 1.f) {
             regional = 1.f;
         }
-        if (maxDiff > kDeskewRegionalMaxSpread) {
+        if (maxDiff > spread) {
             regional = 0.f;
         }
         out->regionalConsistency = regional;
@@ -10842,6 +10708,30 @@ static void ApplyDeskewSafetyGate(DeskewEstimateResult* r) {
         r->decision = DeskewDecision::Uncertain;
         r->angle = 0.f;
         r->reason = "angle_out_of_range";
+        return;
+    }
+    // A large tilt has to beat upright by a clear margin. Bands of a steeply
+    // rotated page do not each contain a full text line, so the regional vote
+    // must not cancel a whole-page peak. The 2.6 confidence floor is for the
+    // ±7° shear sweep, where max/min stays near 1 even at the true angle.
+    if (fabsf(cand) > 7.f) {
+        if (r->improvementScore < 0.15f) {
+            r->decision = DeskewDecision::Uncertain;
+            r->angle = 0.f;
+            r->reason = "large_angle_weak";
+            return;
+        }
+        r->decision = DeskewDecision::Deskew;
+        r->angle = ClampDeskewDeg(cand);
+        r->reason = "ok";
+        return;
+    }
+    // A vertical header can make the three bands disagree while the body
+    // still has a clear small skew. Don't throw that peak away.
+    if (fabsf(cand) <= 7.f && r->improvementScore >= 0.08f && r->confidence >= 3.f) {
+        r->decision = DeskewDecision::Deskew;
+        r->angle = ClampDeskewDeg(cand);
+        r->reason = "ok";
         return;
     }
     if (r->confidence < kDeskewMinConfidence) {
@@ -10989,6 +10879,8 @@ float EngineMupdfEstimatePageDeskewDeg(EngineBase* engine, int pageNo) {
     return EngineMupdfEstimatePageDeskew(engine, pageNo).angle;
 }
 
+static bool EngineMupdfApplyPageRotateCw(EngineBase* engine, int pageNo, int wantCw);
+
 float EngineMupdfDeskewPage(EngineBase* engine, int pageNo) {
     EngineMupdf* e = AsEngineMupdf(engine);
     if (!e || pageNo < 1) {
@@ -11001,6 +10893,19 @@ float EngineMupdfDeskewPage(EngineBase* engine, int pageNo) {
     }
     DeskewEstimateResult est = EngineMupdfEstimatePageDeskew(engine, pageNo);
     float deg = est.angle;
+    // A quarter turn is a /Rotate, not a skew inside the old page box.
+    // fz_rotate is counter-clockwise; PDF /Rotate is clockwise.
+    if (e->pdfdoc && fabsf(fabsf(deg) - 90.f) <= 1.f) {
+        int cw = deg > 0.f ? 270 : 90;
+        int curRot = EngineMupdfGetPageRotateCw(engine, pageNo);
+        if (EngineMupdfApplyPageRotateCw(engine, pageNo, curRot + cw)) {
+            pi->deskewDeg = 0.f;
+            pi->deskewDirty = false;
+            e->modifiedDeskew = true;
+            logf("deskew page %d quarter turn -> /Rotate %+d\n", pageNo, cw);
+            return deg;
+        }
+    }
     pi->deskewDeg = deg;
     pi->deskewDirty = deg != 0.f;
     if (deg != 0.f) {
@@ -11306,7 +11211,8 @@ RenderedBitmap* EngineMupdf::RenderPage(RenderPageArgs& args) {
         const DarkModeProfile* darkProfile = args.darkProfile;
         bool followDirect = DarkModeProfileUsesFollowThemeDirect(darkProfile);
         bool followV2 = DarkModeProfileUsesFollowThemeV2(darkProfile);
-        bool paperScanBinarize = FollowThemeWholeTileBitmapBlockedForPaperScan(ctx, this, pageInfo, page);
+        bool paperScanBinarize = GetPdfImageDarkStrategy() != PdfImageDarkStrategy::Original &&
+                                 FollowThemeWholeTileBitmapBlockedForPaperScan(ctx, this, pageInfo, page);
         bool followBitmapRecolor = (followDirect || followV2) &&
                                    (FollowThemePageUsesBitmapRecolor(this, ctx, pageInfo, page) || paperScanBinarize);
         bool usedFollowThemeWrap = followDirect && !followBitmapRecolor;
@@ -11363,8 +11269,17 @@ RenderedBitmap* EngineMupdf::RenderPage(RenderPageArgs& args) {
             }
             bitmap = NewRenderedFzPixmap(ctx, pix);
             if (bitmap && followBitmapRecolor && darkProfile && !paperScanBinarize) {
+                Vec<Rect> skipRects;
+                Vec<Rect>* skipPtr = nullptr;
+                if (PdfFollowThemePreservesEmbeddedImageColors()) {
+                    RectF renderRect = pageRect ? *pageRect : ToRectF(fz_bound_page(ctx, page));
+                    GetBitmapRecolorSkipRects(pageNo, zoom, rotation, renderRect, bitmap->GetSize(), skipRects);
+                    if (skipRects.Size() > 0) {
+                        skipPtr = &skipRects;
+                    }
+                }
                 UpdateBitmapColors(bitmap->GetBitmap(), darkProfile->foreground, darkProfile->pageBackground,
-                                   darkProfile->linkColor, nullptr);
+                                   darkProfile->linkColor, skipPtr);
             }
         }
         fz_always(ctx) {
@@ -11431,6 +11346,12 @@ RenderedBitmap* EngineMupdf::RenderPage(RenderPageArgs& args) {
             }
         }
     } else {
+        // Dark EPUB only. Automatic mode uses the same image treatment as PDF.
+        // Simple and tone bake those maps; original skips this callback.
+        bool cutout = EpubFlattenedCutoutWanted(defaultExt);
+        if (cutout) {
+            EpubFlattenedCutoutPush();
+        }
         fz_try(ctx) {
             pix = fz_new_pixmap_with_bbox(ctx, csRgb, ibounds, nullptr, 1);
             fz_clear_pixmap_with_value(ctx, pix, 0xff);
@@ -11445,6 +11366,9 @@ RenderedBitmap* EngineMupdf::RenderPage(RenderPageArgs& args) {
             bitmap = NewRenderedFzPixmap(ctx, pix);
         }
         fz_always(ctx) {
+            if (cutout) {
+                EpubFlattenedCutoutPop();
+            }
             fz_drop_pixmap(ctx, pix);
         }
         fz_catch(ctx) {
@@ -14873,6 +14797,279 @@ bool EngineMupdfSetPageRotateCw(EngineBase* engine, int pageNo, int wantCw) {
         return false;
     }
     return EngineMupdfApplyPageRotateCw(engine, pageNo, wantCw);
+}
+
+// Clockwise degrees in [0, 360). A value within 0.05° of 0/90/180/270 is that step.
+static bool ClockwiseDeltaIsQuarter(float deg, int* deltaCw) {
+    float a = fmodf(deg, 360.f);
+    if (a < 0.f) {
+        a += 360.f;
+    }
+    const float kTargets[] = {0.f, 90.f, 180.f, 270.f, 360.f};
+    for (float t : kTargets) {
+        if (fabsf(a - t) <= 0.05f) {
+            int d = (int)(t + 0.5f);
+            if (d >= 360) {
+                d = 0;
+            }
+            if (deltaCw) {
+                *deltaCw = d;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+// Largest axis-aligned rectangle inside a w×h page turned by deg degrees.
+// False when the turn is a multiple of 90°: the bounding box is already tight.
+static bool InscribedPageSize(float w, float h, float deg, float* wr, float* hr) {
+    if (!wr || !hr || w < 1.f || h < 1.f) {
+        return false;
+    }
+    float a = fabsf(fmodf(deg, 180.f));
+    if (a > 90.f) {
+        a = 180.f - a;
+    }
+    if (a < 0.05f || a > 89.95f) {
+        return false;
+    }
+    float rad = a * 0.0174532925f;
+    float sinA = fabsf(sinf(rad));
+    float cosA = fabsf(cosf(rad));
+    if (sinA < 1e-4f || cosA < 1e-4f) {
+        return false;
+    }
+    bool widthIsLonger = w >= h;
+    float sideLong = widthIsLonger ? w : h;
+    float sideShort = widthIsLonger ? h : w;
+    float outW = 0;
+    float outH = 0;
+    if (sideShort <= 2.f * sinA * cosA * sideLong || fabsf(sinA - cosA) < 1e-4f) {
+        float x = 0.5f * sideShort;
+        if (widthIsLonger) {
+            outW = x / sinA;
+            outH = x / cosA;
+        } else {
+            outW = x / cosA;
+            outH = x / sinA;
+        }
+    } else {
+        float cos2 = cosA * cosA - sinA * sinA;
+        if (fabsf(cos2) < 1e-4f) {
+            return false;
+        }
+        outW = (w * cosA - h * sinA) / cos2;
+        outH = (h * cosA - w * sinA) / cos2;
+    }
+    if (outW < 1.f || outH < 1.f) {
+        return false;
+    }
+    *wr = outW;
+    *hr = outH;
+    return true;
+}
+
+static fz_matrix FitzAroundCenter(float cx, float cy, fz_matrix op) {
+    fz_matrix m = fz_translate(-cx, -cy);
+    m = fz_concat(m, op);
+    m = fz_concat(m, fz_translate(cx, cy));
+    return m;
+}
+
+// Page transform MuPDF would build for a box at the origin with no /Rotate.
+static fz_matrix PdfPageCtmForBox(float pdfW, float pdfH, float userUnit) {
+    fz_matrix p = fz_scale(userUnit, -userUnit);
+    fz_rect nb = fz_transform_rect(fz_make_rect(0, 0, pdfW, pdfH), p);
+    return fz_concat(p, fz_translate(-nb.x0, -nb.y0));
+}
+
+static void PdfPutBoxIfPresent(fz_context* ctx, pdf_obj* pageobj, pdf_obj* key, fz_rect box) {
+    if (pdf_dict_get_inheritable(ctx, pageobj, key)) {
+        pdf_dict_put_rect(ctx, pageobj, key, box);
+    }
+}
+
+// q / cm / Q around the existing content. The matrix is in PDF user space.
+static bool PdfWrapContentsWithCm(fz_context* ctx, pdf_document* doc, pdf_obj* pageobj, fz_matrix cm) {
+    pdf_obj* contents = pdf_dict_get(ctx, pageobj, PDF_NAME(Contents));
+    if (!contents) {
+        return false;
+    }
+    fz_buffer* pre = nullptr;
+    fz_buffer* post = nullptr;
+    pdf_obj* preStm = nullptr;
+    pdf_obj* postStm = nullptr;
+    bool ok = false;
+    fz_var(pre);
+    fz_var(post);
+    fz_var(preStm);
+    fz_var(postStm);
+    fz_var(ok);
+    fz_try(ctx) {
+        pre = fz_new_buffer(ctx, 128);
+        fz_append_string(ctx, pre, "q\n");
+        fz_append_printf(ctx, pre, "%g %g %g %g %g %g cm\n", cm.a, cm.b, cm.c, cm.d, cm.e, cm.f);
+        post = fz_new_buffer(ctx, 8);
+        fz_append_string(ctx, post, "Q\n");
+        preStm = pdf_add_new_dict(ctx, doc, 0);
+        pdf_update_stream(ctx, doc, preStm, pre, 0);
+        fz_drop_buffer(ctx, pre);
+        pre = nullptr;
+        postStm = pdf_add_new_dict(ctx, doc, 0);
+        pdf_update_stream(ctx, doc, postStm, post, 0);
+        fz_drop_buffer(ctx, post);
+        post = nullptr;
+        if (pdf_is_array(ctx, contents)) {
+            pdf_array_insert(ctx, contents, preStm, 0);
+            pdf_array_push(ctx, contents, postStm);
+        } else {
+            pdf_obj* arr = pdf_new_array(ctx, doc, 3);
+            pdf_array_push(ctx, arr, preStm);
+            pdf_array_push(ctx, arr, contents);
+            pdf_array_push(ctx, arr, postStm);
+            pdf_dict_put_drop(ctx, pageobj, PDF_NAME(Contents), arr);
+        }
+        pdf_drop_obj(ctx, preStm);
+        preStm = nullptr;
+        pdf_drop_obj(ctx, postStm);
+        postStm = nullptr;
+        ok = true;
+    }
+    fz_always(ctx) {
+        if (pre) {
+            fz_drop_buffer(ctx, pre);
+        }
+        if (post) {
+            fz_drop_buffer(ctx, post);
+        }
+        if (preStm) {
+            pdf_drop_obj(ctx, preStm);
+        }
+        if (postStm) {
+            pdf_drop_obj(ctx, postStm);
+        }
+    }
+    fz_catch(ctx) {
+        fz_report_error(ctx);
+        ok = false;
+    }
+    return ok;
+}
+
+bool EngineMupdfCanAdjustPageView(EngineBase* engine) {
+    EngineMupdf* e = AsEngineMupdf(engine);
+    return e && e->pdfdoc;
+}
+
+bool EngineMupdfAdjustPageView(EngineBase* engine, int pageNo, float cwDeg, bool flipH, bool flipV, bool autoCrop) {
+    EngineMupdf* e = AsEngineMupdf(engine);
+    if (!e || !e->pdfdoc || pageNo < 1 || pageNo > engine->PageCount()) {
+        return false;
+    }
+    if (cwDeg > 180.f) {
+        cwDeg = 180.f;
+    }
+    if (cwDeg < -180.f) {
+        cwDeg = -180.f;
+    }
+    float deskew = EngineMupdfGetPageDeskewDeg(engine, pageNo);
+    // A clean quarter turn with nothing else to bake stays a /Rotate edit.
+    // Session deskew is part of what is on screen, so a tilted page is baked.
+    int delta = 0;
+    if (!flipH && !flipV && fabsf(deskew) < 0.05f && ClockwiseDeltaIsQuarter(cwDeg, &delta)) {
+        if (delta == 0) {
+            return false;
+        }
+        int cur = EngineMupdfGetPageRotateCw(engine, pageNo);
+        if (!EngineMupdfApplyPageRotateCw(engine, pageNo, cur + delta)) {
+            return false;
+        }
+        engine->SetOcrPageRotate(pageNo, 0);
+        return true;
+    }
+
+    auto ctx = e->Ctx();
+    ScopedCritSec scope(&e->docLock);
+    bool changed = false;
+    fz_var(changed);
+    fz_try(ctx) {
+        pdf_obj* pageobj = pdf_lookup_page_obj(ctx, e->pdfdoc, pageNo - 1);
+        float userUnit = pageobj ? pdf_dict_get_real_default(ctx, pageobj, PDF_NAME(UserUnit), 1) : 1.f;
+        if (userUnit < 0.01f) {
+            userUnit = 1.f;
+        }
+        if (pageobj) {
+            fz_rect mbox{};
+            fz_matrix pageCtm{};
+            pdf_page_obj_transform(ctx, pageobj, &mbox, &pageCtm);
+            fz_rect fitzBox = fz_transform_rect(mbox, pageCtm);
+            float cx = (fitzBox.x0 + fitzBox.x1) * 0.5f;
+            float cy = (fitzBox.y0 + fitzBox.y1) * 0.5f;
+            float visW = fitzBox.x1 - fitzBox.x0;
+            float visH = fitzBox.y1 - fitzBox.y0;
+            // What the user sees, then the dialog: deskew, flip, clockwise turn.
+            fz_matrix view = FitzAroundCenter(cx, cy, fz_rotate(deskew));
+            float sx = flipH ? -1.f : 1.f;
+            float sy = flipV ? -1.f : 1.f;
+            view = fz_concat(view, FitzAroundCenter(cx, cy, fz_scale(sx, sy)));
+            view = fz_concat(view, FitzAroundCenter(cx, cy, fz_rotate(cwDeg)));
+            fz_rect bounds = fz_transform_rect(fitzBox, view);
+            if (autoCrop) {
+                float cropW = 0;
+                float cropH = 0;
+                if (InscribedPageSize(visW, visH, cwDeg + deskew, &cropW, &cropH)) {
+                    float mx = (bounds.x0 + bounds.x1) * 0.5f;
+                    float my = (bounds.y0 + bounds.y1) * 0.5f;
+                    bounds = fz_make_rect(mx - cropW * 0.5f, my - cropH * 0.5f, mx + cropW * 0.5f, my + cropH * 0.5f);
+                }
+            }
+            float fw = bounds.x1 - bounds.x0;
+            float fh = bounds.y1 - bounds.y0;
+            if (fw >= 1.f && fh >= 1.f && fw <= 20000.f && fh <= 20000.f) {
+                fz_matrix shifted = fz_concat(view, fz_translate(-bounds.x0, -bounds.y0));
+                float pdfW = fw / userUnit;
+                float pdfH = fh / userUnit;
+                fz_matrix pNew = PdfPageCtmForBox(pdfW, pdfH, userUnit);
+                // want = pageCtm then the view. cm then the new page transform equals want.
+                fz_matrix want = fz_concat(pageCtm, shifted);
+                fz_matrix cm = fz_concat(want, fz_invert_matrix(pNew));
+                if (PdfWrapContentsWithCm(ctx, e->pdfdoc, pageobj, cm)) {
+                    fz_rect box = fz_make_rect(0, 0, pdfW, pdfH);
+                    pdf_dict_put_rect(ctx, pageobj, PDF_NAME(MediaBox), box);
+                    pdf_dict_put_rect(ctx, pageobj, PDF_NAME(CropBox), box);
+                    PdfPutBoxIfPresent(ctx, pageobj, PDF_NAME(BleedBox), box);
+                    PdfPutBoxIfPresent(ctx, pageobj, PDF_NAME(TrimBox), box);
+                    PdfPutBoxIfPresent(ctx, pageobj, PDF_NAME(ArtBox), box);
+                    // A local 0 overrides an inherited /Rotate. Leaving it set would turn the baked page again.
+                    pdf_dict_put_int(ctx, pageobj, PDF_NAME(Rotate), 0);
+                    changed = true;
+                    logf("AdjustPageView: page %d cw %.2f deskew %.2f flip %d%d crop %d box %.1f x %.1f\n", pageNo,
+                         cwDeg, deskew, flipH ? 1 : 0, flipV ? 1 : 0, autoCrop ? 1 : 0, pdfW, pdfH);
+                }
+            }
+        }
+    }
+    fz_catch(ctx) {
+        fz_report_error(ctx);
+        changed = false;
+    }
+    if (!changed) {
+        return false;
+    }
+    if (pageNo - 1 < e->pages.Size()) {
+        FzPageInfo* pi = e->pages[pageNo - 1];
+        if (pi) {
+            pi->deskewDeg = 0;
+            pi->deskewDirty = false;
+            DropSingleFzPageCache(ctx, pi);
+            pi->mediabox = {};
+        }
+    }
+    RefreshModifiedDeskewFlag(e);
+    e->ClearTextCacheForPage(pageNo);
+    engine->SetOcrPageRotate(pageNo, 0);
+    return true;
 }
 
 bool EngineMupdfEnsurePageOcrRotate(EngineBase* engine, int pageNo) {

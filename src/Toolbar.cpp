@@ -103,10 +103,10 @@ static ToolbarButtonInfo gToolbarButtons[] = {
     {TbIcon::AnnotText, CmdCreateAnnotText, _TRN("Text Annotation (Ctrl+click to lock)")},
     {TbIcon::AnnotStamp, CmdCreateAnnotStamp, _TRN("Stamp Annotation (Ctrl+click to lock)")},
     {TbIcon::Dictionary, CmdToggleDoubleClickWordLookup, _TRN("Toggle Double-Click Word Lookup")},
+    {TbIcon::DisplayFilter, CmdDisplayFilter, _TRN("Enhance Display")},
     {TbIcon::ThemeMoon, CmdToggleLightDarkTheme, _TRN("Toggle &Light/Dark Theme")},
     {TbIcon::DocColorFollowTheme, CmdSetPdfDocumentColorModeBlack,
      _TRN("Document Color Mode: Match theme (use current theme colors)")},
-    {TbIcon::DisplayFilter, CmdDisplayFilter, _TRN("Enhance Display")},
     {TbIcon::Ocr, CmdToggleAutoOcr, _TRN("Auto OCR")},
     {TbIcon::Speak, CmdReadAloud, _TRN("Read Aloud")},
     {TbIcon::Fullscreen, CmdToggleFullscreen, _TRN("Toggle Fullscreen (F11)")},
@@ -540,7 +540,7 @@ static TBBUTTON TbButtonFromButtonInfo(const ToolbarButtonInfo& bi, bool noTrans
         bi.cmdId == CmdToggleFullscreen || bi.cmdId == CmdDisplayFilter) {
         b.fsStyle = BTNS_CHECK;
     }
-    if (bi.cmdId == CmdToggleAutoOcr) {
+    if (bi.cmdId == CmdToggleAutoOcr || bi.cmdId == CmdSetPdfDocumentColorModeBlack) {
         b.fsStyle = BTNS_CHECK | BTNS_DROPDOWN;
     }
     if (bi.bmpIndex == TbIcon::Text) {

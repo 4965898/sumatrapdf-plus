@@ -23,6 +23,9 @@ struct DisplayFilterParams {
 DisplayFilterParams GetDisplayFilterForTab(WindowTab* tab);
 DisplayFilterParams GetDisplayFilterForController(DocController* ctrl);
 void SetDisplayFilterForTab(WindowTab* tab, const DisplayFilterParams& p, bool saveAndRepaint);
+// fs null, or use-default: wand off. Otherwise the mode saved for that file.
+struct FileState;
+void RestoreDisplayFilterForTab(WindowTab* tab, FileState* fs);
 // Scanned-page enhancement is PDF-only (toolbar gray for other formats).
 bool DisplayFilterSupportedForEngine(EngineBase* engine);
 bool DisplayFilterSupportedForTab(WindowTab* tab);

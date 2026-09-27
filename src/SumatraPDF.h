@@ -171,6 +171,8 @@ constexpr UINT CmdTtsVoiceSmartBilingual = 0x7206;
 constexpr UINT CmdTtsSmartBilingualSettings = 0x7207;
 constexpr UINT CmdTtsVoiceSmartOnlineBilingual = 0x7208;
 constexpr UINT CmdTtsSmartOnlineBilingualSettings = 0x7209;
+constexpr UINT CmdTtsVoiceMultilingual = 0x720A;
+constexpr UINT CmdTtsMultilingualSettings = 0x720B;
 // Global speed menu: separate Chinese / English rates
 constexpr UINT CmdTtsSpeedZhFirst = 0x7310;
 constexpr UINT CmdTtsSpeedZhLast = 0x7316;
@@ -183,6 +185,7 @@ constexpr UINT CmdTtsSpeedEnCustom = 0x7327;
 // English voice per text chunk instead of using a single fixed voice
 constexpr const char* kTtsSmartBilingualVoiceId = "smart:zh-en";
 constexpr const char* kTtsSmartOnlineBilingualVoiceId = "smart-online:zh-en";
+constexpr const char* kTtsMultilingualVoiceId = "online:multilingual";
 
 void RebuildReadAloudMenu(MainWindow* win, HMENU menu, bool useContextMenuCursorPoint = false);
 bool HandleReadAloudMenuCommand(MainWindow* win, int cmdId);

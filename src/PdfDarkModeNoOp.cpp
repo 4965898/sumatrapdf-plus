@@ -187,6 +187,12 @@ bool PdfDarkModeImageHasPreservablePhotoRects(fz_context* ctx, fz_image* image) 
     return false;
 }
 
+bool PdfDarkModeImageShouldStayOriginal(fz_context* ctx, fz_image* image) {
+    (void)ctx;
+    (void)image;
+    return false;
+}
+
 bool PdfDarkModeImageDecodeLooksLikeGrayscalePortrait(fz_context* ctx, fz_image* image) {
     (void)ctx;
     (void)image;

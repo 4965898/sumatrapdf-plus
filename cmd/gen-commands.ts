@@ -279,12 +279,15 @@ export const commands = [
     "CmdToggleOcrAutoSave", "Toggle Auto-save After OCR",
     "CmdToggleOcrCopyMerged", "Toggle Paragraph-merged Copy",
     "CmdAiRecognizePdfToc", "AI Recognize Table of Contents",
-    "CmdPdfRotatePages", "Rotate PDF Pages...",
+    "CmdPdfRotatePages", "Manually Adjust Pages...",
     "CmdDeskewPage", "Deskew Page",
     "CmdDeskewAllScannedPages", "Deskew All Scanned Pages",
     "CmdToggleOcrDeskew", "Toggle Deskew During OCR",
     "CmdDisplayFilter", "Enhance Display",
     "CmdPdfTocApplyOffsetBelow", "Apply This Page Offset Below",
+    "CmdSetDocumentImageDarkAuto", "Images: Automatic",
+    "CmdSetDocumentImageDarkOriginal", "Images: Keep Original Colors",
+    "CmdSetDocumentImageDarkTone", "Images: Smart Invert",
     "CmdNone", "Do nothing",
 ];
 

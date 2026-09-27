@@ -161,6 +161,14 @@ int EngineMupdfGetPageRotateCw(EngineBase* engine, int pageNo);
 // Set this page's PDF /Rotate to an absolute value (0/90/180/270, e.g. for
 // manual page rotation). Returns true if the page was changed.
 bool EngineMupdfSetPageRotateCw(EngineBase* engine, int pageNo, int wantCw);
+// Turn the page as the user sees it. Quarter turns with no flip update /Rotate.
+// Any other angle, or a flip, bakes a matrix into the content and clears /Rotate.
+// cwDeg is clockwise degrees. autoCrop keeps only the upright rectangle that
+// stays inside the turned page. Returns true if the page changed.
+// True only when the file is a PDF this command can rewrite. Ebooks and other
+// MuPDF types stay disabled in the menu.
+bool EngineMupdfCanAdjustPageView(EngineBase* engine);
+bool EngineMupdfAdjustPageView(EngineBase* engine, int pageNo, float cwDeg, bool flipH, bool flipV, bool autoCrop);
 // Auto-deskew decision. Uncertain is treated as NoDeskew by all callers.
 enum class DeskewDecision {
     NoDeskew = 0,

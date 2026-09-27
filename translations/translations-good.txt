@@ -1011,6 +1011,9 @@ nl:V&erwijder uit Geschiedenis
 pl:&Usuń z historii
 sk:&Odstrániť z histórie
 tw:從歷程記錄中移除(&R)
+:&Retry
+cn:重试(&R)
+tw:重試(&R)
 :&Save
 br:&Salvar
 cn:保存(&S)
@@ -2243,6 +2246,225 @@ nl:Voeg toe aan Favorieten
 pl:Dodaj do ulubionych
 sk:Pridať k obľúbeným
 tw:加到我的最愛
+:Manually Adjust Pages
+af:Pas bladsye handmatig aan
+am:Էջերը ձեռքով կարգավորել
+ar:ضبط الصفحات يدوياً
+az:Səhifələri əl ilə tənzimlə
+bg:Ръчно коригиране на страниците
+bn:পৃষ্ঠা ম্যানুয়ালি সামঞ্জস্য করুন
+br:Ajustar páginas manualmente
+bs:Ručno prilagodi stranice
+by:Наладзіць старонкі ўручную
+ca:Ajusta les pàgines manualment
+ca-xv:Ajusta les pàgines manualment
+cn:手动调整页面
+co:Aghjustà e pagine manualmente
+cy:Addasu tudalennau â llaw
+cz:Ručně upravit stránky
+de:Seiten manuell anpassen
+dk:Juster sider manuelt
+el:Μη αυτόματη προσαρμογή σελίδων
+es:Ajustar páginas manualmente
+et:Kohanda lehti käsitsi
+eu:Doitu orriak eskuz
+fa:تنظیم دستی صفحه‌ها
+fi:Säädä sivuja manuaalisesti
+fo:Still síður við hond
+fr:Ajuster les pages manuellement
+fy-nl:Siden mei de hân oanpasse
+ga:Coigeartaigh leathanaigh de láimh
+gl:Axustar as páxinas manualmente
+he:התאמת עמודים ידנית
+hi:पृष्ठ मैन्युअल रूप से समायोजित करें
+hr:Ručno prilagodi stranice
+hu:Oldalak kézi módosítása
+id:Sesuaikan halaman secara manual
+it:Regola le pagine manualmente
+ja:ページを手動で調整
+jv:Atur kaca kanthi manual
+ka:გვერდების ხელით მორგება
+kr:페이지 수동 조정
+ku:پەڕەکان بە دەستی ڕێکبخە
+kw:Aswiya folennow gans dorn
+lt:Rankiniu būdu koreguoti puslapius
+lv:Manuāli pielāgot lapas
+mk:Рачно прилагоди страници
+ml:പേജുകൾ സ്വമേധയാ ക്രമീകരിക്കുക
+mm:စာမျက်နှာများကို ကိုယ်တိုင်ချိန်ညှိရန်
+my:Laraskan halaman secara manual
+ne:पृष्ठहरू म्यानुअल रूपमा समायोजन गर्नुहोस्
+nl:Pagina's handmatig aanpassen
+nn:Juster sider manuelt
+no:Juster sider manuelt
+pa:ਪੰਨਿਆਂ ਨੂੰ ਹੱਥੀਂ ਵਿਵਸਥਿਤ ਕਰੋ
+pl:Ręcznie dostosuj strony
+pt:Ajustar páginas manualmente
+ro:Ajustați paginile manual
+ru:Настроить страницы вручную
+sat:ᱥᱟᱦᱴᱟ ᱠᱚ ᱛᱤ ᱛᱮ ᱥᱚᱡᱷᱮ
+si:පිටු අතින් සකසන්න
+sk:Ručne upraviť strany
+sl:Ročno prilagodi strani
+sn:Gadzirisa mapeji nemaoko
+sp-rs:Ručno prilagodi stranice
+sq:Rregullo faqet manualisht
+sr-rs:Ручно прилагоди странице
+sv:Justera sidor manuellt
+ta:பக்கங்களை கைமுறையாக சரிசெய்
+th:ปรับหน้าด้วยตนเอง
+tl:Ayusin nang manu-mano ang mga pahina
+tr:Sayfaları elle ayarla
+tw:手動調整頁面
+uk:Налаштувати сторінки вручну
+uz:Sahifalarni qo'lda sozlash
+vn:Điều chỉnh trang thủ công
+:Manually Adjust Pages...
+af:Pas bladsye handmatig aan...
+am:Էջերը ձեռքով կարգավորել...
+ar:ضبط الصفحات يدوياً...
+az:Səhifələri əl ilə tənzimlə...
+bg:Ръчно коригиране на страниците...
+bn:পৃষ্ঠা ম্যানুয়ালি সামঞ্জস্য করুন...
+br:Ajustar páginas manualmente...
+bs:Ručno prilagodi stranice...
+by:Наладзіць старонкі ўручную...
+ca:Ajusta les pàgines manualment...
+ca-xv:Ajusta les pàgines manualment...
+cn:手动调整页面...
+co:Aghjustà e pagine manualmente...
+cy:Addasu tudalennau â llaw...
+cz:Ručně upravit stránky...
+de:Seiten manuell anpassen...
+dk:Juster sider manuelt...
+el:Μη αυτόματη προσαρμογή σελίδων...
+es:Ajustar páginas manualmente...
+et:Kohanda lehti käsitsi...
+eu:Doitu orriak eskuz...
+fa:تنظیم دستی صفحه‌ها...
+fi:Säädä sivuja manuaalisesti...
+fo:Still síður við hond...
+fr:Ajuster les pages manuellement...
+fy-nl:Siden mei de hân oanpasse...
+ga:Coigeartaigh leathanaigh de láimh...
+gl:Axustar as páxinas manualmente...
+he:התאמת עמודים ידנית...
+hi:पृष्ठ मैन्युअल रूप से समायोजित करें...
+hr:Ručno prilagodi stranice...
+hu:Oldalak kézi módosítása...
+id:Sesuaikan halaman secara manual...
+it:Regola le pagine manualmente...
+ja:ページを手動で調整...
+jv:Atur kaca kanthi manual...
+ka:გვერდების ხელით მორგება...
+kr:페이지 수동 조정...
+ku:پەڕەکان بە دەستی ڕێکبخە...
+kw:Aswiya folennow gans dorn...
+lt:Rankiniu būdu koreguoti puslapius...
+lv:Manuāli pielāgot lapas...
+mk:Рачно прилагоди страници...
+ml:പേജുകൾ സ്വമേധയാ ക്രമീകരിക്കുക...
+mm:စာမျက်နှာများကို ကိုယ်တိုင်ချိန်ညှိရန်...
+my:Laraskan halaman secara manual...
+ne:पृष्ठहरू म्यानुअल रूपमा समायोजन गर्नुहोस्...
+nl:Pagina's handmatig aanpassen...
+nn:Juster sider manuelt...
+no:Juster sider manuelt...
+pa:ਪੰਨਿਆਂ ਨੂੰ ਹੱਥੀਂ ਵਿਵਸਥਿਤ ਕਰੋ...
+pl:Ręcznie dostosuj strony...
+pt:Ajustar páginas manualmente...
+ro:Ajustați paginile manual...
+ru:Настроить страницы вручную...
+sat:ᱥᱟᱦᱴᱟ ᱠᱚ ᱛᱤ ᱛᱮ ᱥᱚᱡᱷᱮ...
+si:පිටු අතින් සකසන්න...
+sk:Ručne upraviť strany...
+sl:Ročno prilagodi strani...
+sn:Gadzirisa mapeji nemaoko...
+sp-rs:Ručno prilagodi stranice...
+sq:Rregullo faqet manualisht...
+sr-rs:Ручно прилагоди странице...
+sv:Justera sidor manuellt...
+ta:பக்கங்களை கைமுறையாக சரிசெய்...
+th:ปรับหน้าด้วยตนเอง...
+tl:Ayusin nang manu-mano ang mga pahina...
+tr:Sayfaları elle ayarla...
+tw:手動調整頁面...
+uk:Налаштувати сторінки вручну...
+uz:Sahifalarni qo'lda sozlash...
+vn:Điều chỉnh trang thủ công...
+:Adjusted %d page(s) and saved to '%s'
+af:Adjusted %d page(s) and saved to '%s'
+am:Adjusted %d page(s) and saved to '%s'
+ar:Adjusted %d page(s) and saved to '%s'
+az:Adjusted %d page(s) and saved to '%s'
+bg:Adjusted %d page(s) and saved to '%s'
+bn:Adjusted %d page(s) and saved to '%s'
+br:Adjusted %d page(s) and saved to '%s'
+bs:Adjusted %d page(s) and saved to '%s'
+by:Adjusted %d page(s) and saved to '%s'
+ca:Adjusted %d page(s) and saved to '%s'
+ca-xv:Adjusted %d page(s) and saved to '%s'
+cn:已调整 %d 页并保存到 '%s'
+co:Adjusted %d page(s) and saved to '%s'
+cy:Adjusted %d page(s) and saved to '%s'
+cz:Adjusted %d page(s) and saved to '%s'
+de:Adjusted %d page(s) and saved to '%s'
+dk:Adjusted %d page(s) and saved to '%s'
+el:Adjusted %d page(s) and saved to '%s'
+es:Adjusted %d page(s) and saved to '%s'
+et:Adjusted %d page(s) and saved to '%s'
+eu:Adjusted %d page(s) and saved to '%s'
+fa:Adjusted %d page(s) and saved to '%s'
+fi:Adjusted %d page(s) and saved to '%s'
+fo:Adjusted %d page(s) and saved to '%s'
+fr:Adjusted %d page(s) and saved to '%s'
+fy-nl:Adjusted %d page(s) and saved to '%s'
+ga:Adjusted %d page(s) and saved to '%s'
+gl:Adjusted %d page(s) and saved to '%s'
+he:Adjusted %d page(s) and saved to '%s'
+hi:Adjusted %d page(s) and saved to '%s'
+hr:Adjusted %d page(s) and saved to '%s'
+hu:Adjusted %d page(s) and saved to '%s'
+id:Adjusted %d page(s) and saved to '%s'
+it:Adjusted %d page(s) and saved to '%s'
+ja:Adjusted %d page(s) and saved to '%s'
+jv:Adjusted %d page(s) and saved to '%s'
+ka:Adjusted %d page(s) and saved to '%s'
+kr:Adjusted %d page(s) and saved to '%s'
+ku:Adjusted %d page(s) and saved to '%s'
+kw:Adjusted %d page(s) and saved to '%s'
+lt:Adjusted %d page(s) and saved to '%s'
+lv:Adjusted %d page(s) and saved to '%s'
+mk:Adjusted %d page(s) and saved to '%s'
+ml:Adjusted %d page(s) and saved to '%s'
+mm:Adjusted %d page(s) and saved to '%s'
+my:Adjusted %d page(s) and saved to '%s'
+ne:Adjusted %d page(s) and saved to '%s'
+nl:Adjusted %d page(s) and saved to '%s'
+nn:Adjusted %d page(s) and saved to '%s'
+no:Adjusted %d page(s) and saved to '%s'
+pa:Adjusted %d page(s) and saved to '%s'
+pl:Adjusted %d page(s) and saved to '%s'
+pt:Adjusted %d page(s) and saved to '%s'
+ro:Adjusted %d page(s) and saved to '%s'
+ru:Adjusted %d page(s) and saved to '%s'
+sat:Adjusted %d page(s) and saved to '%s'
+si:Adjusted %d page(s) and saved to '%s'
+sk:Adjusted %d page(s) and saved to '%s'
+sl:Adjusted %d page(s) and saved to '%s'
+sn:Adjusted %d page(s) and saved to '%s'
+sp-rs:Adjusted %d page(s) and saved to '%s'
+sq:Adjusted %d page(s) and saved to '%s'
+sr-rs:Adjusted %d page(s) and saved to '%s'
+sv:Adjusted %d page(s) and saved to '%s'
+ta:Adjusted %d page(s) and saved to '%s'
+th:Adjusted %d page(s) and saved to '%s'
+tl:Adjusted %d page(s) and saved to '%s'
+tr:Adjusted %d page(s) and saved to '%s'
+tw:已調整 %d 頁並儲存到 '%s'
+uk:Adjusted %d page(s) and saved to '%s'
+uz:Adjusted %d page(s) and saved to '%s'
+vn:Adjusted %d page(s) and saved to '%s'
 :Adjusting ebook layout… chapter %d / %d
 af:Adjusting ebook layout… chapter %d / %d
 am:Adjusting ebook layout… chapter %d / %d
@@ -2683,6 +2905,79 @@ nl:Aantekeningen
 pl:Adnotacje
 sk:Anotácie
 tw:註解
+:Any Angle
+af:Any Angle
+am:Any Angle
+ar:Any Angle
+az:Any Angle
+bg:Any Angle
+bn:Any Angle
+br:Any Angle
+bs:Any Angle
+by:Any Angle
+ca:Any Angle
+ca-xv:Any Angle
+cn:任意角度
+co:Any Angle
+cy:Any Angle
+cz:Any Angle
+de:Any Angle
+dk:Any Angle
+el:Any Angle
+es:Any Angle
+et:Any Angle
+eu:Any Angle
+fa:Any Angle
+fi:Any Angle
+fo:Any Angle
+fr:Any Angle
+fy-nl:Any Angle
+ga:Any Angle
+gl:Any Angle
+he:Any Angle
+hi:Any Angle
+hr:Any Angle
+hu:Any Angle
+id:Any Angle
+it:Any Angle
+ja:Any Angle
+jv:Any Angle
+ka:Any Angle
+kr:Any Angle
+ku:Any Angle
+kw:Any Angle
+lt:Any Angle
+lv:Any Angle
+mk:Any Angle
+ml:Any Angle
+mm:Any Angle
+my:Any Angle
+ne:Any Angle
+nl:Any Angle
+nn:Any Angle
+no:Any Angle
+pa:Any Angle
+pl:Any Angle
+pt:Any Angle
+ro:Any Angle
+ru:Any Angle
+sat:Any Angle
+si:Any Angle
+sk:Any Angle
+sl:Any Angle
+sn:Any Angle
+sp-rs:Any Angle
+sq:Any Angle
+sr-rs:Any Angle
+sv:Any Angle
+ta:Any Angle
+th:Any Angle
+tl:Any Angle
+tr:Any Angle
+tw:任意角度
+uk:Any Angle
+uz:Any Angle
+vn:Any Angle
 :Appearance
 af:Appearance
 am:Appearance
@@ -2932,6 +3227,9 @@ tw:套用旋轉
 uk:Apply Rotation
 uz:Apply Rotation
 vn:Apply Rotation
+:Apply This Page Offset Below
+cn:后面都用这个页差
+tw:後面都用這個頁差
 :Apply To
 af:Apply To
 am:Apply To
@@ -3506,6 +3804,79 @@ nl:Auteur: %s
 pl:Autor: %s
 sk:Autor: %s
 tw:作者: %s
+:Auto Crop
+af:Auto Crop
+am:Auto Crop
+ar:Auto Crop
+az:Auto Crop
+bg:Auto Crop
+bn:Auto Crop
+br:Auto Crop
+bs:Auto Crop
+by:Auto Crop
+ca:Auto Crop
+ca-xv:Auto Crop
+cn:自动裁切
+co:Auto Crop
+cy:Auto Crop
+cz:Auto Crop
+de:Auto Crop
+dk:Auto Crop
+el:Auto Crop
+es:Auto Crop
+et:Auto Crop
+eu:Auto Crop
+fa:Auto Crop
+fi:Auto Crop
+fo:Auto Crop
+fr:Auto Crop
+fy-nl:Auto Crop
+ga:Auto Crop
+gl:Auto Crop
+he:Auto Crop
+hi:Auto Crop
+hr:Auto Crop
+hu:Auto Crop
+id:Auto Crop
+it:Auto Crop
+ja:Auto Crop
+jv:Auto Crop
+ka:Auto Crop
+kr:Auto Crop
+ku:Auto Crop
+kw:Auto Crop
+lt:Auto Crop
+lv:Auto Crop
+mk:Auto Crop
+ml:Auto Crop
+mm:Auto Crop
+my:Auto Crop
+ne:Auto Crop
+nl:Auto Crop
+nn:Auto Crop
+no:Auto Crop
+pa:Auto Crop
+pl:Auto Crop
+pt:Auto Crop
+ro:Auto Crop
+ru:Auto Crop
+sat:Auto Crop
+si:Auto Crop
+sk:Auto Crop
+sl:Auto Crop
+sn:Auto Crop
+sp-rs:Auto Crop
+sq:Auto Crop
+sr-rs:Auto Crop
+sv:Auto Crop
+ta:Auto Crop
+th:Auto Crop
+tl:Auto Crop
+tr:Auto Crop
+tw:自動裁切
+uk:Auto Crop
+uz:Auto Crop
+vn:Auto Crop
 :Auto OCR
 af:Auto OCR
 am:Auto OCR
@@ -4713,6 +5084,9 @@ nl:Kan dit bestand niet afdrukken
 pl:Nie można drukować tego pliku
 sk:Tlač súboru zlyhala
 tw:無法列印此檔案
+:Cannot save '%s'
+cn:无法保存“%s”
+tw:無法儲存「%s」
 :Cannot start inverse search command. Please check the command line in the settings.
 am:Հնարավոր չէ որոնել։ Ստուգեք հրամանների տողի կարգավորումները։
 br:Não pôde iniciar o comando de busca invertido. Por favor verifique a linha de comando nas configurações.
@@ -8554,6 +8928,9 @@ tw:傾斜校正
 uk:Deskew Page
 uz:Deskew Page
 vn:Deskew Page
+:Deskew cleared.
+cn:已清除倾斜校正。
+tw:已清除倾斜校正。
 :Deskew during OCR
 af:Deskew during OCR
 am:Deskew during OCR
@@ -8773,9 +9150,6 @@ tw:已傾斜校正 %d 頁。
 uk:Deskewed %d page(s).
 uz:Deskewed %d page(s).
 vn:Deskewed %d page(s).
-:Deskew cleared.
-cn:已清除倾斜校正。
-tw:已清除倾斜校正。
 :Deskewed by %.1f degrees.
 af:Deskewed by %.1f degrees.
 am:Deskewed by %.1f degrees.
@@ -10740,6 +11114,9 @@ tw:增強顯示已開啟
 uk:Enhance Display is enabled
 uz:Enhance Display is enabled
 vn:Enhance Display is enabled
+:Enhance Display is only available for PDF
+cn:增强显示仅适用于 PDF
+tw:增強顯示僅適用於 PDF
 :Enter a speed from 0.25x to 2.00x.
 af:Enter a speed from 0.25x to 2.00x.
 am:Enter a speed from 0.25x to 2.00x.
@@ -11793,6 +12170,79 @@ tw:儲存旋轉後的頁面失敗。
 uk:Failed to save rotated PDF pages.
 uz:Failed to save rotated PDF pages.
 vn:Failed to save rotated PDF pages.
+:Failed to save the adjusted pages.
+af:Failed to save the adjusted pages.
+am:Failed to save the adjusted pages.
+ar:Failed to save the adjusted pages.
+az:Failed to save the adjusted pages.
+bg:Failed to save the adjusted pages.
+bn:Failed to save the adjusted pages.
+br:Failed to save the adjusted pages.
+bs:Failed to save the adjusted pages.
+by:Failed to save the adjusted pages.
+ca:Failed to save the adjusted pages.
+ca-xv:Failed to save the adjusted pages.
+cn:保存调整后的页面失败。
+co:Failed to save the adjusted pages.
+cy:Failed to save the adjusted pages.
+cz:Failed to save the adjusted pages.
+de:Failed to save the adjusted pages.
+dk:Failed to save the adjusted pages.
+el:Failed to save the adjusted pages.
+es:Failed to save the adjusted pages.
+et:Failed to save the adjusted pages.
+eu:Failed to save the adjusted pages.
+fa:Failed to save the adjusted pages.
+fi:Failed to save the adjusted pages.
+fo:Failed to save the adjusted pages.
+fr:Failed to save the adjusted pages.
+fy-nl:Failed to save the adjusted pages.
+ga:Failed to save the adjusted pages.
+gl:Failed to save the adjusted pages.
+he:Failed to save the adjusted pages.
+hi:Failed to save the adjusted pages.
+hr:Failed to save the adjusted pages.
+hu:Failed to save the adjusted pages.
+id:Failed to save the adjusted pages.
+it:Failed to save the adjusted pages.
+ja:Failed to save the adjusted pages.
+jv:Failed to save the adjusted pages.
+ka:Failed to save the adjusted pages.
+kr:Failed to save the adjusted pages.
+ku:Failed to save the adjusted pages.
+kw:Failed to save the adjusted pages.
+lt:Failed to save the adjusted pages.
+lv:Failed to save the adjusted pages.
+mk:Failed to save the adjusted pages.
+ml:Failed to save the adjusted pages.
+mm:Failed to save the adjusted pages.
+my:Failed to save the adjusted pages.
+ne:Failed to save the adjusted pages.
+nl:Failed to save the adjusted pages.
+nn:Failed to save the adjusted pages.
+no:Failed to save the adjusted pages.
+pa:Failed to save the adjusted pages.
+pl:Failed to save the adjusted pages.
+pt:Failed to save the adjusted pages.
+ro:Failed to save the adjusted pages.
+ru:Failed to save the adjusted pages.
+sat:Failed to save the adjusted pages.
+si:Failed to save the adjusted pages.
+sk:Failed to save the adjusted pages.
+sl:Failed to save the adjusted pages.
+sn:Failed to save the adjusted pages.
+sp-rs:Failed to save the adjusted pages.
+sq:Failed to save the adjusted pages.
+sr-rs:Failed to save the adjusted pages.
+sv:Failed to save the adjusted pages.
+ta:Failed to save the adjusted pages.
+th:Failed to save the adjusted pages.
+tl:Failed to save the adjusted pages.
+tr:Failed to save the adjusted pages.
+tw:儲存調整後的頁面失敗。
+uk:Failed to save the adjusted pages.
+uz:Failed to save the adjusted pages.
+vn:Failed to save the adjusted pages.
 :Failed to write the extended file extension information to the registry
 am:Հնարավոր չեղավ ֆայլի ընդլայնման մասին գրառել Գրանցատեղիում
 br:Falhou em gravar a extensão do arquivo extendido no registro
@@ -12513,9 +12963,6 @@ tw:尋找上個選取内容
 :Find TOC Item in Body
 cn:在正文中定位
 tw:在正文中定位
-:Apply This Page Offset Below
-cn:后面都用这个页差
-tw:後面都用這個頁差
 :Find in Body and Link
 cn:在正文中定位并关联
 tw:在正文中定位並關聯
@@ -12668,6 +13115,152 @@ de:Flashpix-Version:
 it:Versione Flashpix:
 nl:Flashpix Versie:
 pl:Wersja Flashpix:
+:Flip Horizontal
+af:Flip Horizontal
+am:Flip Horizontal
+ar:Flip Horizontal
+az:Flip Horizontal
+bg:Flip Horizontal
+bn:Flip Horizontal
+br:Flip Horizontal
+bs:Flip Horizontal
+by:Flip Horizontal
+ca:Flip Horizontal
+ca-xv:Flip Horizontal
+cn:水平翻转
+co:Flip Horizontal
+cy:Flip Horizontal
+cz:Flip Horizontal
+de:Flip Horizontal
+dk:Flip Horizontal
+el:Flip Horizontal
+es:Flip Horizontal
+et:Flip Horizontal
+eu:Flip Horizontal
+fa:Flip Horizontal
+fi:Flip Horizontal
+fo:Flip Horizontal
+fr:Flip Horizontal
+fy-nl:Flip Horizontal
+ga:Flip Horizontal
+gl:Flip Horizontal
+he:Flip Horizontal
+hi:Flip Horizontal
+hr:Flip Horizontal
+hu:Flip Horizontal
+id:Flip Horizontal
+it:Flip Horizontal
+ja:Flip Horizontal
+jv:Flip Horizontal
+ka:Flip Horizontal
+kr:Flip Horizontal
+ku:Flip Horizontal
+kw:Flip Horizontal
+lt:Flip Horizontal
+lv:Flip Horizontal
+mk:Flip Horizontal
+ml:Flip Horizontal
+mm:Flip Horizontal
+my:Flip Horizontal
+ne:Flip Horizontal
+nl:Flip Horizontal
+nn:Flip Horizontal
+no:Flip Horizontal
+pa:Flip Horizontal
+pl:Flip Horizontal
+pt:Flip Horizontal
+ro:Flip Horizontal
+ru:Flip Horizontal
+sat:Flip Horizontal
+si:Flip Horizontal
+sk:Flip Horizontal
+sl:Flip Horizontal
+sn:Flip Horizontal
+sp-rs:Flip Horizontal
+sq:Flip Horizontal
+sr-rs:Flip Horizontal
+sv:Flip Horizontal
+ta:Flip Horizontal
+th:Flip Horizontal
+tl:Flip Horizontal
+tr:Flip Horizontal
+tw:水平翻轉
+uk:Flip Horizontal
+uz:Flip Horizontal
+vn:Flip Horizontal
+:Flip Vertical
+af:Flip Vertical
+am:Flip Vertical
+ar:Flip Vertical
+az:Flip Vertical
+bg:Flip Vertical
+bn:Flip Vertical
+br:Flip Vertical
+bs:Flip Vertical
+by:Flip Vertical
+ca:Flip Vertical
+ca-xv:Flip Vertical
+cn:垂直翻转
+co:Flip Vertical
+cy:Flip Vertical
+cz:Flip Vertical
+de:Flip Vertical
+dk:Flip Vertical
+el:Flip Vertical
+es:Flip Vertical
+et:Flip Vertical
+eu:Flip Vertical
+fa:Flip Vertical
+fi:Flip Vertical
+fo:Flip Vertical
+fr:Flip Vertical
+fy-nl:Flip Vertical
+ga:Flip Vertical
+gl:Flip Vertical
+he:Flip Vertical
+hi:Flip Vertical
+hr:Flip Vertical
+hu:Flip Vertical
+id:Flip Vertical
+it:Flip Vertical
+ja:Flip Vertical
+jv:Flip Vertical
+ka:Flip Vertical
+kr:Flip Vertical
+ku:Flip Vertical
+kw:Flip Vertical
+lt:Flip Vertical
+lv:Flip Vertical
+mk:Flip Vertical
+ml:Flip Vertical
+mm:Flip Vertical
+my:Flip Vertical
+ne:Flip Vertical
+nl:Flip Vertical
+nn:Flip Vertical
+no:Flip Vertical
+pa:Flip Vertical
+pl:Flip Vertical
+pt:Flip Vertical
+ro:Flip Vertical
+ru:Flip Vertical
+sat:Flip Vertical
+si:Flip Vertical
+sk:Flip Vertical
+sl:Flip Vertical
+sn:Flip Vertical
+sp-rs:Flip Vertical
+sq:Flip Vertical
+sr-rs:Flip Vertical
+sv:Flip Vertical
+ta:Flip Vertical
+th:Flip Vertical
+tl:Flip Vertical
+tr:Flip Vertical
+tw:垂直翻轉
+uk:Flip Vertical
+uz:Flip Vertical
+vn:Flip Vertical
 :Focal Length (35mm):
 br:Tamanho do Foco (35 mm):
 cn:焦距 (35 mm):
@@ -13724,6 +14317,298 @@ nl:Afbeeldingen
 pl:Obrazy
 sk:Obrázky
 tw:圖片
+:Images: Automatic
+af:Images: Automatic
+am:Images: Automatic
+ar:Images: Automatic
+az:Images: Automatic
+bg:Images: Automatic
+bn:Images: Automatic
+br:Images: Automatic
+bs:Images: Automatic
+by:Images: Automatic
+ca:Images: Automatic
+ca-xv:Images: Automatic
+cn:图片：自动
+co:Images: Automatic
+cy:Images: Automatic
+cz:Images: Automatic
+de:Images: Automatic
+dk:Images: Automatic
+el:Images: Automatic
+es:Images: Automatic
+et:Images: Automatic
+eu:Images: Automatic
+fa:Images: Automatic
+fi:Images: Automatic
+fo:Images: Automatic
+fr:Images: Automatic
+fy-nl:Images: Automatic
+ga:Images: Automatic
+gl:Images: Automatic
+he:Images: Automatic
+hi:Images: Automatic
+hr:Images: Automatic
+hu:Images: Automatic
+id:Images: Automatic
+it:Images: Automatic
+ja:Images: Automatic
+jv:Images: Automatic
+ka:Images: Automatic
+kr:Images: Automatic
+ku:Images: Automatic
+kw:Images: Automatic
+lt:Images: Automatic
+lv:Images: Automatic
+mk:Images: Automatic
+ml:Images: Automatic
+mm:Images: Automatic
+my:Images: Automatic
+ne:Images: Automatic
+nl:Images: Automatic
+nn:Images: Automatic
+no:Images: Automatic
+pa:Images: Automatic
+pl:Images: Automatic
+pt:Images: Automatic
+ro:Images: Automatic
+ru:Images: Automatic
+sat:Images: Automatic
+si:Images: Automatic
+sk:Images: Automatic
+sl:Images: Automatic
+sn:Images: Automatic
+sp-rs:Images: Automatic
+sq:Images: Automatic
+sr-rs:Images: Automatic
+sv:Images: Automatic
+ta:Images: Automatic
+th:Images: Automatic
+tl:Images: Automatic
+tr:Images: Automatic
+tw:圖片：自動
+uk:Images: Automatic
+uz:Images: Automatic
+vn:Images: Automatic
+:Images: Keep Original Colors
+af:Images: Keep Original Colors
+am:Images: Keep Original Colors
+ar:Images: Keep Original Colors
+az:Images: Keep Original Colors
+bg:Images: Keep Original Colors
+bn:Images: Keep Original Colors
+br:Images: Keep Original Colors
+bs:Images: Keep Original Colors
+by:Images: Keep Original Colors
+ca:Images: Keep Original Colors
+ca-xv:Images: Keep Original Colors
+cn:图片：保持原色
+co:Images: Keep Original Colors
+cy:Images: Keep Original Colors
+cz:Images: Keep Original Colors
+de:Images: Keep Original Colors
+dk:Images: Keep Original Colors
+el:Images: Keep Original Colors
+es:Images: Keep Original Colors
+et:Images: Keep Original Colors
+eu:Images: Keep Original Colors
+fa:Images: Keep Original Colors
+fi:Images: Keep Original Colors
+fo:Images: Keep Original Colors
+fr:Images: Keep Original Colors
+fy-nl:Images: Keep Original Colors
+ga:Images: Keep Original Colors
+gl:Images: Keep Original Colors
+he:Images: Keep Original Colors
+hi:Images: Keep Original Colors
+hr:Images: Keep Original Colors
+hu:Images: Keep Original Colors
+id:Images: Keep Original Colors
+it:Images: Keep Original Colors
+ja:Images: Keep Original Colors
+jv:Images: Keep Original Colors
+ka:Images: Keep Original Colors
+kr:Images: Keep Original Colors
+ku:Images: Keep Original Colors
+kw:Images: Keep Original Colors
+lt:Images: Keep Original Colors
+lv:Images: Keep Original Colors
+mk:Images: Keep Original Colors
+ml:Images: Keep Original Colors
+mm:Images: Keep Original Colors
+my:Images: Keep Original Colors
+ne:Images: Keep Original Colors
+nl:Images: Keep Original Colors
+nn:Images: Keep Original Colors
+no:Images: Keep Original Colors
+pa:Images: Keep Original Colors
+pl:Images: Keep Original Colors
+pt:Images: Keep Original Colors
+ro:Images: Keep Original Colors
+ru:Images: Keep Original Colors
+sat:Images: Keep Original Colors
+si:Images: Keep Original Colors
+sk:Images: Keep Original Colors
+sl:Images: Keep Original Colors
+sn:Images: Keep Original Colors
+sp-rs:Images: Keep Original Colors
+sq:Images: Keep Original Colors
+sr-rs:Images: Keep Original Colors
+sv:Images: Keep Original Colors
+ta:Images: Keep Original Colors
+th:Images: Keep Original Colors
+tl:Images: Keep Original Colors
+tr:Images: Keep Original Colors
+tw:圖片：保持原色
+uk:Images: Keep Original Colors
+uz:Images: Keep Original Colors
+vn:Images: Keep Original Colors
+:Images: Simple Invert
+af:Images: Simple Invert
+am:Images: Simple Invert
+ar:Images: Simple Invert
+az:Images: Simple Invert
+bg:Images: Simple Invert
+bn:Images: Simple Invert
+br:Images: Simple Invert
+bs:Images: Simple Invert
+by:Images: Simple Invert
+ca:Images: Simple Invert
+ca-xv:Images: Simple Invert
+cn:图片：简单反色
+co:Images: Simple Invert
+cy:Images: Simple Invert
+cz:Images: Simple Invert
+de:Images: Simple Invert
+dk:Images: Simple Invert
+el:Images: Simple Invert
+es:Images: Simple Invert
+et:Images: Simple Invert
+eu:Images: Simple Invert
+fa:Images: Simple Invert
+fi:Images: Simple Invert
+fo:Images: Simple Invert
+fr:Images: Simple Invert
+fy-nl:Images: Simple Invert
+ga:Images: Simple Invert
+gl:Images: Simple Invert
+he:Images: Simple Invert
+hi:Images: Simple Invert
+hr:Images: Simple Invert
+hu:Images: Simple Invert
+id:Images: Simple Invert
+it:Images: Simple Invert
+ja:Images: Simple Invert
+jv:Images: Simple Invert
+ka:Images: Simple Invert
+kr:Images: Simple Invert
+ku:Images: Simple Invert
+kw:Images: Simple Invert
+lt:Images: Simple Invert
+lv:Images: Simple Invert
+mk:Images: Simple Invert
+ml:Images: Simple Invert
+mm:Images: Simple Invert
+my:Images: Simple Invert
+ne:Images: Simple Invert
+nl:Images: Simple Invert
+nn:Images: Simple Invert
+no:Images: Simple Invert
+pa:Images: Simple Invert
+pl:Images: Simple Invert
+pt:Images: Simple Invert
+ro:Images: Simple Invert
+ru:Images: Simple Invert
+sat:Images: Simple Invert
+si:Images: Simple Invert
+sk:Images: Simple Invert
+sl:Images: Simple Invert
+sn:Images: Simple Invert
+sp-rs:Images: Simple Invert
+sq:Images: Simple Invert
+sr-rs:Images: Simple Invert
+sv:Images: Simple Invert
+ta:Images: Simple Invert
+th:Images: Simple Invert
+tl:Images: Simple Invert
+tr:Images: Simple Invert
+tw:圖片：簡單反色
+uk:Images: Simple Invert
+uz:Images: Simple Invert
+vn:Images: Simple Invert
+:Images: Smart Invert
+af:Beelde: Slim omkeer
+am:Պատկերներ․ Խելացի շրջում
+ar:الصور: عكس ذكي
+az:Şəkillər: Ağıllı tərsinə
+bg:Изображения: Интелигентно обръщане
+bn:ছবি: স্মার্ট উল্টানো
+br:Imagens: Inversão inteligente
+bs:Slike: Pametno invertovanje
+by:Выявы: Разумнае інвертаванне
+ca:Imatges: Inversió intel·ligent
+ca-xv:Imatges: Inversió intel·ligent
+cn:图片：智能反色
+co:Imaghjini: Inversione intelligente
+cy:Delweddau: Gwrthdroi clyfar
+cz:Obrázky: Chytrá inverze
+de:Bilder: Intelligente Umkehrung
+dk:Billeder: Smart invertering
+el:Εικόνες: Έξυπνη αντιστροφή
+es:Imágenes: Inversión inteligente
+et:Pildid: Nutikas pööramine
+eu:Irudiak: Alderantzikatze adimenduna
+fa:تصاویر: وارونه‌سازی هوشمند
+fi:Kuvat: Älykäs käänteisväri
+fo:Myndir: Snild vend
+fr:Images : Inversion intelligente
+fy-nl:Ofbylden: Tûk omkeare
+ga:Íomhánna: Inbhéartú cliste
+gl:Imaxes: Inversión intelixente
+he:תמונות: היפוך חכם
+hi:चित्र: स्मार्ट उलटना
+hr:Slike: Pametno invertiranje
+hu:Képek: Intelligens invertálás
+id:Gambar: Inversi cerdas
+it:Immagini: Inversione intelligente
+ja:画像：スマート反転
+jv:Gambar: Inversi pinter
+ka:სურათები: ჭკვიანი ინვერსია
+kr:이미지: 스마트 반전
+ku:وێنەکان: پێچەوانەی زیرەک
+kw:Imajys: Treylans skiansek
+lt:Vaizdai: Išmanusis invertavimas
+lv:Attēli: Viedā inversija
+mk:Слики: Паметно инвертирање
+ml:ചിത്രങ്ങൾ: സ്മാർട്ട് വിപരീതം
+mm:ပုံများ: စမတ်ပြောင်းပြန်
+my:Imej: Songsangan pintar
+ne:तस्बिर: स्मार्ट उल्टो
+nl:Afbeeldingen: Slim omkeren
+nn:Bilete: Smart invertering
+no:Bilder: Smart invertering
+pa:ਤਸਵੀਰਾਂ: ਸਮਾਰਟ ਉਲਟ
+pl:Obrazy: Inteligentne odwrócenie
+pt:Imagens: Inversão inteligente
+ro:Imagini: Inversare inteligentă
+ru:Изображения: Умная инверсия
+sat:ᱪᱤᱛᱟᱹᱨ: ᱥᱢᱟᱨᱴ ᱩᱞᱴᱟᱹ
+si:රූප: ස්මාර්ට් ප්‍රතිලෝම
+sk:Obrázky: Inteligentná inverzia
+sl:Slike: Pametna inverzija
+sn:Mifananidzo: Kushandura zvine hungwaru
+sp-rs:Slike: Pametno invertovanje
+sq:Imazhe: Përmbysje e zgjuar
+sr-rs:Слике: Паметно инвертовање
+sv:Bilder: Smart invertering
+ta:படங்கள்: ஸ்மார்ட் தலைகீழ்
+th:รูปภาพ: กลับสีอัจฉริยะ
+tl:Mga larawan: Matalinong pagbaligtad
+tr:Görseller: Akıllı ters çevirme
+tw:圖片：智能反色
+uk:Зображення: Розумна інверсія
+uz:Rasmlar: Aqlli teskari
+vn:Hình ảnh: Đảo màu thông minh
 :Import TOC
 cn:导入目录
 de:Inhaltsverzeichnis importieren
@@ -16590,6 +17475,79 @@ tw:暫不
 uk:Not now
 uz:Not now
 vn:Not now
+:Nothing to change.
+af:Nothing to change.
+am:Nothing to change.
+ar:Nothing to change.
+az:Nothing to change.
+bg:Nothing to change.
+bn:Nothing to change.
+br:Nothing to change.
+bs:Nothing to change.
+by:Nothing to change.
+ca:Nothing to change.
+ca-xv:Nothing to change.
+cn:没有需要改的地方。
+co:Nothing to change.
+cy:Nothing to change.
+cz:Nothing to change.
+de:Nothing to change.
+dk:Nothing to change.
+el:Nothing to change.
+es:Nothing to change.
+et:Nothing to change.
+eu:Nothing to change.
+fa:Nothing to change.
+fi:Nothing to change.
+fo:Nothing to change.
+fr:Nothing to change.
+fy-nl:Nothing to change.
+ga:Nothing to change.
+gl:Nothing to change.
+he:Nothing to change.
+hi:Nothing to change.
+hr:Nothing to change.
+hu:Nothing to change.
+id:Nothing to change.
+it:Nothing to change.
+ja:Nothing to change.
+jv:Nothing to change.
+ka:Nothing to change.
+kr:Nothing to change.
+ku:Nothing to change.
+kw:Nothing to change.
+lt:Nothing to change.
+lv:Nothing to change.
+mk:Nothing to change.
+ml:Nothing to change.
+mm:Nothing to change.
+my:Nothing to change.
+ne:Nothing to change.
+nl:Nothing to change.
+nn:Nothing to change.
+no:Nothing to change.
+pa:Nothing to change.
+pl:Nothing to change.
+pt:Nothing to change.
+ro:Nothing to change.
+ru:Nothing to change.
+sat:Nothing to change.
+si:Nothing to change.
+sk:Nothing to change.
+sl:Nothing to change.
+sn:Nothing to change.
+sp-rs:Nothing to change.
+sq:Nothing to change.
+sr-rs:Nothing to change.
+sv:Nothing to change.
+ta:Nothing to change.
+th:Nothing to change.
+tl:Nothing to change.
+tr:Nothing to change.
+tw:沒有需要改的地方。
+uk:Nothing to change.
+uz:Nothing to change.
+vn:Nothing to change.
 :Number of Images:
 br:Número de Imagens:
 cn:图像数:
@@ -17583,6 +18541,152 @@ ja:オンライン AI 認識
 kr:온라인 AI 인식
 ru:Онлайн-распознавание ИИ
 tw:網路辨識
+:Online multilingual voice settings
+af:Online multilingual voice settings
+am:Online multilingual voice settings
+ar:Online multilingual voice settings
+az:Online multilingual voice settings
+bg:Online multilingual voice settings
+bn:Online multilingual voice settings
+br:Online multilingual voice settings
+bs:Online multilingual voice settings
+by:Online multilingual voice settings
+ca:Online multilingual voice settings
+ca-xv:Online multilingual voice settings
+cn:在线多语言语音设置
+co:Online multilingual voice settings
+cy:Online multilingual voice settings
+cz:Online multilingual voice settings
+de:Online multilingual voice settings
+dk:Online multilingual voice settings
+el:Online multilingual voice settings
+es:Online multilingual voice settings
+et:Online multilingual voice settings
+eu:Online multilingual voice settings
+fa:Online multilingual voice settings
+fi:Online multilingual voice settings
+fo:Online multilingual voice settings
+fr:Online multilingual voice settings
+fy-nl:Online multilingual voice settings
+ga:Online multilingual voice settings
+gl:Online multilingual voice settings
+he:Online multilingual voice settings
+hi:Online multilingual voice settings
+hr:Online multilingual voice settings
+hu:Online multilingual voice settings
+id:Online multilingual voice settings
+it:Online multilingual voice settings
+ja:Online multilingual voice settings
+jv:Online multilingual voice settings
+ka:Online multilingual voice settings
+kr:Online multilingual voice settings
+ku:Online multilingual voice settings
+kw:Online multilingual voice settings
+lt:Online multilingual voice settings
+lv:Online multilingual voice settings
+mk:Online multilingual voice settings
+ml:Online multilingual voice settings
+mm:Online multilingual voice settings
+my:Online multilingual voice settings
+ne:Online multilingual voice settings
+nl:Online multilingual voice settings
+nn:Online multilingual voice settings
+no:Online multilingual voice settings
+pa:Online multilingual voice settings
+pl:Online multilingual voice settings
+pt:Online multilingual voice settings
+ro:Online multilingual voice settings
+ru:Online multilingual voice settings
+sat:Online multilingual voice settings
+si:Online multilingual voice settings
+sk:Online multilingual voice settings
+sl:Online multilingual voice settings
+sn:Online multilingual voice settings
+sp-rs:Online multilingual voice settings
+sq:Online multilingual voice settings
+sr-rs:Online multilingual voice settings
+sv:Online multilingual voice settings
+ta:Online multilingual voice settings
+th:Online multilingual voice settings
+tl:Online multilingual voice settings
+tr:Online multilingual voice settings
+tw:線上多語言語音設定
+uk:Online multilingual voice settings
+uz:Online multilingual voice settings
+vn:Online multilingual voice settings
+:Online multilingual voice settings...
+af:Online multilingual voice settings...
+am:Online multilingual voice settings...
+ar:Online multilingual voice settings...
+az:Online multilingual voice settings...
+bg:Online multilingual voice settings...
+bn:Online multilingual voice settings...
+br:Online multilingual voice settings...
+bs:Online multilingual voice settings...
+by:Online multilingual voice settings...
+ca:Online multilingual voice settings...
+ca-xv:Online multilingual voice settings...
+cn:在线多语言语音设置...
+co:Online multilingual voice settings...
+cy:Online multilingual voice settings...
+cz:Online multilingual voice settings...
+de:Online multilingual voice settings...
+dk:Online multilingual voice settings...
+el:Online multilingual voice settings...
+es:Online multilingual voice settings...
+et:Online multilingual voice settings...
+eu:Online multilingual voice settings...
+fa:Online multilingual voice settings...
+fi:Online multilingual voice settings...
+fo:Online multilingual voice settings...
+fr:Online multilingual voice settings...
+fy-nl:Online multilingual voice settings...
+ga:Online multilingual voice settings...
+gl:Online multilingual voice settings...
+he:Online multilingual voice settings...
+hi:Online multilingual voice settings...
+hr:Online multilingual voice settings...
+hu:Online multilingual voice settings...
+id:Online multilingual voice settings...
+it:Online multilingual voice settings...
+ja:Online multilingual voice settings...
+jv:Online multilingual voice settings...
+ka:Online multilingual voice settings...
+kr:Online multilingual voice settings...
+ku:Online multilingual voice settings...
+kw:Online multilingual voice settings...
+lt:Online multilingual voice settings...
+lv:Online multilingual voice settings...
+mk:Online multilingual voice settings...
+ml:Online multilingual voice settings...
+mm:Online multilingual voice settings...
+my:Online multilingual voice settings...
+ne:Online multilingual voice settings...
+nl:Online multilingual voice settings...
+nn:Online multilingual voice settings...
+no:Online multilingual voice settings...
+pa:Online multilingual voice settings...
+pl:Online multilingual voice settings...
+pt:Online multilingual voice settings...
+ro:Online multilingual voice settings...
+ru:Online multilingual voice settings...
+sat:Online multilingual voice settings...
+si:Online multilingual voice settings...
+sk:Online multilingual voice settings...
+sl:Online multilingual voice settings...
+sn:Online multilingual voice settings...
+sp-rs:Online multilingual voice settings...
+sq:Online multilingual voice settings...
+sr-rs:Online multilingual voice settings...
+sv:Online multilingual voice settings...
+ta:Online multilingual voice settings...
+th:Online multilingual voice settings...
+tl:Online multilingual voice settings...
+tr:Online multilingual voice settings...
+tw:線上多語言語音設定...
+uk:Online multilingual voice settings...
+uz:Online multilingual voice settings...
+vn:Online multilingual voice settings...
 :Online multilingual voices
 af:Aanlyn veeltalige stemme
 am:Առցանց բազմալեզու ձայներ
@@ -27460,6 +28564,9 @@ tw:目錄頁圖片與提示詞已放入剪貼簿，可在 AI 網頁貼上傳送�
 :The entered PDF pages will be rendered and queued for sending.
 cn:将按输入的 PDF 页码逐页取图并等待发送。
 tw:將按輸入的 PDF 頁碼逐頁取圖並等待傳送。
+:The file is open in another program. Close it and click Retry, or save a copy to another location.
+cn:文件正被其他程序打开。请关闭后点重试，或另存为到其他位置。
+tw:檔案正被其他程式開啟。請關閉後按重試，或另存到其他位置。
 :The heading-candidates prompt is on the clipboard. Paste and send it in the AI page.\r\nWhen the reply is ready, click Copy under the AI reply; the app reads it and imports the TOC.
 cn:标题候选提示词已放入剪贴板，可在 AI 网页粘贴发送。\r\n回复完成后，点击 AI 回复下方的“复制”，本程序会自动读取结果并导入目录。
 tw:標題候選提示詞已放入剪貼簿，可在 AI 網頁貼上傳送。\r\n回覆完成後，點擊 AI 回覆下方的「複製」，本程式會自動讀取結果並匯入目錄。
@@ -30664,15 +31771,3 @@ sk:↑ ↓ – navigovať
 :✓ Likely TOC pages found. Please confirm the selection.
 cn:✓ 已找到疑似目录页，请确认选择。
 tw:✓ 已找到疑似目錄頁，請確認選擇。
-:Cannot save '%s'
-cn:无法保存“%s”
-tw:無法儲存「%s」
-:&Retry
-cn:重试(&R)
-tw:重試(&R)
-:The file is open in another program. Close it and click Retry, or save a copy to another location.
-cn:文件正被其他程序打开。请关闭后点重试，或另存为到其他位置。
-tw:檔案正被其他程式開啟。請關閉後按重試，或另存到其他位置。
-:Enhance Display is only available for PDF
-cn:增强显示仅适用于 PDF
-tw:增強顯示僅適用於 PDF

@@ -52,6 +52,10 @@ static DarkImagePolicy dm_follow_image_policy(fz_context* ctx, pdf_dark_mode_dev
 
 static void dm_follow_fill_image(fz_context* ctx, pdf_dark_mode_device* d, fz_image* image, fz_matrix ctm, float alpha,
                                  fz_color_params color_params) {
+    if (GetPdfImageDarkStrategy() == PdfImageDarkStrategy::Original) {
+        fz_fill_image(ctx, d->inner, image, ctm, alpha, color_params);
+        return;
+    }
     DarkImagePolicy policy = dm_follow_image_policy(ctx, d, image, ctm, false);
     RectF imgBounds = dm_follow_image_bounds(ctm, d->followPageBounds);
     float coverage = dm_follow_image_coverage(imgBounds, d->followPageBounds);
@@ -243,7 +247,8 @@ static void dm_fill_image(fz_context* ctx, fz_device* dev, fz_image* image, fz_m
     DarkImagePolicy policy = dm_current_image_policy(d);
     dm_next_image_occurrence(d);
 
-    if (policy == DarkImagePolicy::Preserve && PdfFollowThemePreservesEmbeddedImageColors()) {
+    if (GetPdfImageDarkStrategy() == PdfImageDarkStrategy::Original ||
+        (policy == DarkImagePolicy::Preserve && PdfFollowThemePreservesEmbeddedImageColors())) {
         fz_fill_image(ctx, d->inner, image, ctm, alpha, color_params);
         return;
     }

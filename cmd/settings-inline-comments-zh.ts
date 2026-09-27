@@ -153,6 +153,7 @@ export const settingsInlineCommentsZh: Record<string, string> = {
   ReadAloudSmartVoiceEn: "本地智能英文语音",
   ReadAloudSmartOnlineVoiceZh: "在线智能中文语音",
   ReadAloudSmartOnlineVoiceEn: "在线智能英文语音",
+  ReadAloudMultilingualVoice: "在线多语言语音",
   UiLanguage: "界面语言",
   WindowState: "窗口状态 1正常 2最大化 3全屏 4最小化",
   WindowPos: "窗口位置与尺寸",

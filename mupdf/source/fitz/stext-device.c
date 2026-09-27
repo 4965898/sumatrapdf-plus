@@ -1302,9 +1302,14 @@ do_extract_within_actualtext(fz_context *ctx, fz_stext_device *dev, fz_text_span
 		return;
 	}
 
-	/* We haven't consumed the whole string, so there must be runes left.
-	 * Shut coverity up. */
-	assert(z != 0);
+	/* ActualText can be shorter than the glyphs. The prefix ate every rune
+	 * and this span still has more. Emit those glyphs as themselves. */
+	if (z == 0)
+	{
+		do_extract(ctx, dev, span, ctm, start, span->len, flags);
+		mt->text[0] = 0;
+		return;
+	}
 
 	/* Spot a matching postfix. Can't send it til the end. */
 	for (end = span->len; end > start; end--)

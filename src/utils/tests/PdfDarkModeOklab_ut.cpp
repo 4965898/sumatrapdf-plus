@@ -88,6 +88,47 @@ void PdfDarkModeOklab_UnitTests() {
     float cr = ContrastRatio(out[0], out[1], out[2], palette.bgR, palette.bgG, palette.bgB);
     utassert(cr >= 4.0f);
 
+    // Photos darken without flipping light and shadow, and a weak warm shadow stays dull.
+    float prevPhoto = -1.f;
+    for (int i = 0; i <= 100; i += 10) {
+        float g = i / 100.f;
+        MapRgbPhotoDarkAdapt(g, g, g, palette, out);
+        float outL = RelLuminance(out[0], out[1], out[2]);
+        utassert(outL + 0.002f >= prevPhoto);
+        float inL = RelLuminance(g, g, g);
+        if (i >= 50) {
+            utassert(outL + 0.02f < inL);
+        } else {
+            utassert(outL <= inL + 0.005f);
+        }
+        prevPhoto = outL;
+    }
+    MapRgbPhotoDarkAdapt(0.18f, 0.10f, 0.08f, palette, out);
+    float shadowL = RelLuminance(out[0], out[1], out[2]);
+    utassert(shadowL < 0.08f);
+    utassert(out[0] < out[1] + 0.12f);
+    MapRgbPhotoDarkAdapt(0.92f, 0.90f, 0.86f, palette, out);
+    utassert(RelLuminance(out[0], out[1], out[2]) > shadowL);
+    utassert(fabsf(out[0] - out[1]) < 0.08f && fabsf(out[1] - out[2]) < 0.08f);
+
+    unsigned char flat[8 * 8 * 3];
+    memset(flat, 180, sizeof(flat));
+    utassert(PdfDarkModePhotoAdaptRgbSamples(flat, 8, 8, 3, 8 * 3));
+    MapRgbPhotoDarkAdapt(180.f / 255.f, 180.f / 255.f, 180.f / 255.f, palette, out);
+    utassert(abs(flat[0] - (int)(out[0] * 255.f + 0.5f)) <= 1);
+    utassert(abs(flat[1] - (int)(out[1] * 255.f + 0.5f)) <= 1);
+    utassert(abs(flat[2] - (int)(out[2] * 255.f + 0.5f)) <= 1);
+
+    unsigned char grain[16 * 16 * 3];
+    memset(grain, 80, sizeof(grain));
+    grain[(8 * 16 + 8) * 3 + 0] = 220;
+    grain[(8 * 16 + 8) * 3 + 1] = 220;
+    grain[(8 * 16 + 8) * 3 + 2] = 220;
+    utassert(PdfDarkModePhotoAdaptRgbSamples(grain, 16, 16, 3, 16 * 3));
+    int spike = grain[(8 * 16 + 8) * 3];
+    int field = grain[0];
+    utassert(spike > field + 20);
+
     utassert(PdfDarkModeOklabDistance(1.f, 1.f, 1.f, 1.f, 1.f, 1.f) < 0.001f);
     utassert(PdfDarkModeOklabDistance(1.f, 1.f, 1.f, 0.f, 0.f, 0.f) > 0.15f);
     utassert(PdfDarkModeOklabDistance(0.95f, 0.93f, 0.88f, 0.97f, 0.95f, 0.90f) < 0.06f);

@@ -2,8 +2,42 @@
 
 ## next
 
-- 电子书暗黑模式：插图里的白纸会换成页面底色，线条留在背景上。彩色线条保持原色，黑线改成正文色。照片没有大块纸色时不动。
-  Dark theme for ebooks: the white paper inside an illustration becomes the page background, so the drawing sits on the page. Colored ink stays; black ink is drawn in the text color. A photograph without a paper mat is left as it is.
+## 3.7.33 (2026-09-28)
+
+- 魔法棒（增强显示）按下去只记在当前这本书上。关掉再打开，淡色扫描书还是按下的，别的书还是关的。换一本书，按钮跟着那本书变。
+  The Enhance Display wand stays with the book it was pressed on. After a restart, a pale scan is still on and other books stay off. Switching books follows that book's own state.
+
+- 暗黑主题的智能反色翻到新图片更快。以前每张图都要对每个像素做一整套颜色换算，照片还要逐块找人脸。现在同一套主题色只换算一次，后面的图查表；找人脸的几块同时进行。人脸仍按原来的方式保留原色。翻回已经看过的页还是用缓存。
+  Smart invert in a dark theme turns onto a new picture faster. Each picture used to convert every pixel, and a photo also scanned for faces one block at a time. One theme palette is converted once and later pictures look it up; the face scan runs several blocks at once. Faces still keep their original color the same way. A page already seen still comes from the cache.
+
+- 套装电子书里，点目录会跳到另一本书。目录页码是按大纲顺序存的，建侧边栏时每个条目把序号加了两次，越往后越对错位。维京传奇的书名页因此打开了失落的古城。同一套书里重复的「书名页」「版权页」也会串到后面的书。
+  In a boxed-set ebook, a contents entry could open a different book. Page numbers are stored in outline order, but building the sidebar advanced the index twice per entry, so later entries read the wrong page. The Viking Sagas title page therefore opened Lost Cities. Repeated entries such as title page and copyright page in the same set jumped ahead the same way.
+- 页面已经完整显示在窗口里时，滚轮一格翻一页。以前只有「适应宽度并连续」或「适合单页」按下时滚轮才翻页；两个都没按下（常见的是单页但不是适合页面，或连续但不是适应宽度）时，滚轮不动，只能拖右侧滚动条。页面比窗口高时，滚轮仍在页内滚动，滚到底再进入下一页。
+  When the whole page already fits in the window, one wheel notch turns a page. Previously the wheel turned pages only while Fit Width and Continuous or Fit a Single Page was pressed. With neither pressed (single page at another zoom, or continuous but not fit width), the wheel did nothing and only the right scrollbar moved. A page taller than the window still scrolls inside the page, then continues to the next page.
+- 自动 OCR 不再因为文件是扫描件就自己打开。工具栏上的开关完全手动，开或关记在这份文档上，下次打开还是这个状态。别的文档不受影响。
+  Automatic OCR no longer turns itself on for a scanned PDF. The toolbar switch is manual, and its on or off state is stored with that document, so reopening it keeps the same choice. Other documents stay unchanged.
+- 暗黑主题里，文档颜色模式按钮右边多了一个三角菜单，用来选图片怎么处理。自动仍是现在的按图判断。另外两项是：图片保持原色，以及智能反色（色相不动，明暗改落到主题背景和主题文字上）。简单反色已去掉，以前选过它的会改用智能反色。浅色主题和「原版」不受影响。
+  In a dark theme, the document color button has a menu for how pictures are treated. Automatic is still the current per-picture choice. The other two leave picture pixels unchanged, or smart-invert: keep hue and reseat lightness onto the theme background and theme text. Simple invert is gone; a saved choice of it becomes smart invert. Light themes and Original document colors are unchanged.
+- 自动 OCR 只补文字，不再转动页面，也不再做倾斜校正。自己点的识别仍会转正。文件菜单里的「手动调整页面」可以按任意角度转动、左右或上下翻转，并裁掉转出来的空白三角。正好 90° 时只改页面旋转标记，批注跟着转；其他角度写进页面内容，批注留在原来的位置。
+  Automatic OCR only adds text. It no longer turns a page or straightens a tilt. OCR you start yourself still does. Manually Adjust Pages can turn by any angle, flip horizontally or vertically, and crop the empty corners. A multiple of 90° only changes the page rotation flag, so annotations turn with the page. Any other angle is written into the page content, and annotations stay where they are.
+- 电子书暗黑模式下，白纸上已经抠好的插图会去掉这层白底，底下露出页面背景。只有四边都是白纸、主体不贴边、轮廓清楚的图才会这样；版画、整幅照片和拿不准的图保持原样。
+  In a dark ebook theme, a picture that is clearly a cutout on white paper loses that paper and shows the page background. Only a picture with white on all four sides, a subject that does not touch the edge, and a clear outline is changed. Engravings, full photos, and uncertain pictures stay as they are.
+- 朗读菜单里的「在线多语言语音」分成选定和设置两项，和本地、在线中英双语一样。选定用当前多语言语音，设置里再换具体的声音。
+  Read Aloud’s online multilingual entry is a choice plus a settings item, like the local and online English–Chinese modes. Choosing it uses the saved multilingual voice; settings picks which voice that is.
+- 文档里表格右边的线和其余边一样，是完整的黑线，角上接齐。这条竖线画在格子外侧，裁在页边里时只剩半道灰线，横线还从它右边冒出去。
+  A document table's right edge is a full black line and meets the corners, like the other sides. That stroke sits just outside the cell; clipping it left a gray half-line, with the horizontal rules sticking out past it.
+- 电子书放大字体后，行末的字不再被切掉。页边裁剪用的矩形少算了左边距，每一行最右边大约一个字被裁没；字号保存着，所以重启也还是缺字。
+  Enlarging the ebook font no longer cuts off the last character of each line. The page clip rectangle ignored the left margin, so about one glyph at the right edge was discarded. The font size is saved, so restarting did not bring that character back.
+- 电子书里写在居中段落中的定宽插图会回到段落中间。改成块级显示之后，段落的居中只作用在说明文字上，图本身贴在左边。
+  A fixed-width picture inside a centered ebook paragraph sits in the middle of that paragraph again. Making pictures block-level left the centering on the caption only, so the picture stayed on the left.
+- 电子书插图不再被页边切开。图排在下一页开头时，上一页的下边距里以前会露出一条，翻过去又是同一张图的开头。
+  An ebook picture is no longer sliced by the page edge. A figure that starts at the top of the next page used to leave a strip in the previous page's bottom margin, then appear again in full.
+- 电子书里写死宽度的插图（`width="900"` 这类）会缩进版心，整张图都看得到。以前比页面宽的部分被裁掉，表格和示意图的右边显示不全。
+  Ebook figures with a fixed pixel width (`width="900"`) shrink to the page, so the whole picture stays visible. The part wider than the page used to be clipped, which cut off the right side of tables and diagrams.
+- 电子书的下划线、删除线和波浪线按每一行来画。换行的段落以前合成一个大框，线按整段高度来算，所以又粗，又只出现在最后一行。
+  Ebook underline, strikeout, and squiggly marks are drawn per line. A wrapped paragraph used to become one box, so the stroke was as tall as the whole paragraph and showed up only on the last line.
+- 电子书暗黑模式不再把插图涂成主题色。照片、线条图、表格图各不一样，整张换色会误伤。
+  Dark theme for ebooks no longer recolors pictures into the theme colors. Photos, line art, and diagram images differ too much to recolor as a group.
 - 扫描页 OCR 之后复制选中文字会进剪贴板。段落合并复制以前只在遇到换行标记时才写出文字，选区末尾那一段（常常是整段）被丢掉，剪贴板因此是空的。
   Copying a text selection on an OCR'd scan puts the text on the clipboard. Paragraph-merged copy used to emit text only at a line-break marker, so the tail of the selection (often the whole selection) was dropped and the clipboard stayed empty.
 - 提取目录、校准书签时，书签栏底部不再露出一块白底。校准条还没出现时不再给它留空。

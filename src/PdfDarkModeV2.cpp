@@ -213,6 +213,52 @@ static void v2_remap_ink_plate(fz_context* ctx, fz_pixmap* pix, const DarkModePa
     }
 }
 
+// Photographs that are not inverted still cannot keep a studio-white card.
+// Luminance above 0.55 is pulled toward 0.62. Darker pixels are copied through.
+static void v2_press_highlights_pixmap(fz_pixmap* pix) {
+    if (!pix || !pix->samples || pix->w <= 0 || pix->h <= 0) {
+        return;
+    }
+    int n = pix->n;
+    int comps = n - pix->alpha;
+    if (comps < 1 || n < 1) {
+        return;
+    }
+    for (int y = 0; y < pix->h; y++) {
+        unsigned char* row = pix->samples + (size_t)y * (size_t)pix->stride;
+        for (int x = 0; x < pix->w; x++) {
+            unsigned char* px = row + (size_t)x * (size_t)n;
+            float r, g, b;
+            if (comps >= 3) {
+                r = px[0] / 255.f;
+                g = px[1] / 255.f;
+                b = px[2] / 255.f;
+            } else {
+                r = g = b = px[0] / 255.f;
+            }
+            float or_, og, ob;
+            PdfDarkModeCompressPhotoHighlights(r, g, b, &or_, &og, &ob);
+            auto put = [](float v) -> unsigned char {
+                int i = (int)(v * 255.f + 0.5f);
+                if (i < 0) {
+                    i = 0;
+                }
+                if (i > 255) {
+                    i = 255;
+                }
+                return (unsigned char)i;
+            };
+            if (comps >= 3) {
+                px[0] = put(or_);
+                px[1] = put(og);
+                px[2] = put(ob);
+            } else {
+                px[0] = put(or_);
+            }
+        }
+    }
+}
+
 static fz_image* v2_build_white_mat_image(fz_context* ctx, fz_image* srcImage, const DarkModePalette& palette) {
     fz_pixmap* src = nullptr;
     fz_pixmap* dst = nullptr;
@@ -238,6 +284,14 @@ static fz_image* v2_build_white_mat_image(fz_context* ctx, fz_image* srcImage, c
             if (!dst) {
                 // Glencoe-style callout drop shadows: soft gray rasters, not white mats.
                 dst = PdfDarkModeProcessV2SoftShadowPlatePixmap(ctx, src, palette);
+            }
+            if (!dst && !PdfDarkModeImageShouldStayOriginal(ctx, srcImage)) {
+                // Not a photograph: press studio-white cards. Photos stay original
+                // when there is no white margin to flood.
+                fz_colorspace* cs = src->colorspace ? src->colorspace : fz_device_rgb(ctx);
+                dst = fz_new_pixmap(ctx, cs, src->w, src->h, src->seps, src->alpha);
+                fz_copy_pixmap_rect(ctx, dst, src, fz_make_irect(0, 0, src->w, src->h), nullptr);
+                v2_press_highlights_pixmap(dst);
             }
             if (dst) {
                 result = fz_new_image_from_pixmap(ctx, dst, nullptr);
@@ -431,6 +485,50 @@ static fz_image* v2_build_masked_ink_image(fz_context* ctx, fz_image* srcImage, 
     return result;
 }
 
+static bool v2_image_wants_full_page_process(const DarkImageAnalysis& analysis) {
+    if (analysis.kind == DarkImageKind::Photo) {
+        return false;
+    }
+    const DarkImageFeatures& f = analysis.features;
+    if (PdfDarkModeFeaturesLookLikePhoto(f) || PdfDarkModeFeaturesLookLikeGrayscalePhoto(f) ||
+        PdfDarkModeFeaturesLookLikeNotebookIllustrationPage(f)) {
+        return false;
+    }
+    if (analysis.kind == DarkImageKind::FullPageScan) {
+        return true;
+    }
+    return PdfDarkModeFeaturesLookLikeGovernmentPaperScan(f) ||
+           PdfDarkModeFeaturesLookLikeOfficePaperForDarkBinarize(f) ||
+           PdfDarkModeFeaturesLookLikeFullPageTextScanForBinarize(f) || PdfDarkModeFeaturesLookLikeBwLineArtScan(f);
+}
+
+fz_image* PdfDarkModeAutoProcessImage(fz_context* ctx, fz_image* image, const DarkModePalette& palette) {
+    if (!ctx || !image || image->imagemask) {
+        return nullptr;
+    }
+    if (v2_image_is_paint_chip(image)) {
+        return v2_build_paint_chip_image(ctx, image, palette);
+    }
+    // No page box here. A large scan is treated like a PDF image that covers the page.
+    // A figure skips that analysis: white mat, soft shadow, or a cheap highlight press.
+    bool big = image->w >= 1000 && image->h >= 800;
+    if (!image->mask && !big) {
+        return v2_build_white_mat_image(ctx, image, palette);
+    }
+    DarkImageAnalysis analysis = PdfDarkModeAnalyzeImage(ctx, image, big ? 0.90f : 0.40f, big);
+    bool fullPage = v2_image_wants_full_page_process(analysis);
+    if (image->mask) {
+        if (!fullPage && !big) {
+            return nullptr;
+        }
+        return v2_build_masked_ink_image(ctx, image, palette);
+    }
+    if (fullPage) {
+        return v2_build_page_image(ctx, image, palette, image->w, image->h, nullptr);
+    }
+    return v2_build_white_mat_image(ctx, image, palette);
+}
+
 static void v2_close(fz_context* ctx, fz_device* dev) {
     pdf_dark_mode_v2_device* d = (pdf_dark_mode_v2_device*)dev;
     if (d->inner && d->inner->close_device) {
@@ -486,11 +584,61 @@ static void v2_fill_shade(fz_context* ctx, fz_device* dev, fz_shade* shd, fz_mat
     fz_fill_shade(ctx, d->inner, shd, ctm, alpha, color_params);
 }
 
+// Manual menu choice. Masked ink plates stay on the automatic path: rebuilding
+// them without the mask paints an opaque plate over the text.
+static bool v2_fill_image_with_strategy(fz_context* ctx, pdf_dark_mode_v2_device* d, fz_image* image, fz_matrix ctm,
+                                        float alpha, fz_color_params color_params) {
+    PdfImageDarkStrategy strategy = GetPdfImageDarkStrategy();
+    if (strategy == PdfImageDarkStrategy::Auto || image->mask || v2_image_is_paint_chip(image)) {
+        return false;
+    }
+    if (strategy == PdfImageDarkStrategy::Original) {
+        fz_fill_image(ctx, d->inner, image, ctm, alpha, color_params);
+        return true;
+    }
+    if (strategy != PdfImageDarkStrategy::Tone) {
+        return false;
+    }
+    fz_image* cached = nullptr;
+    if (d->engineCache) {
+        cached = PdfDarkModeEngineCacheLookupProcessed(ctx, d->engineCache, image, d->profileHash,
+                                                       DarkImagePolicy::ThemeRecolor, DarkImageKind::Photo);
+    }
+    fz_image* built = nullptr;
+    fz_image* draw = cached;
+    if (!draw) {
+        built = PdfDarkModeRecolorImage(ctx, image, *d->palette);
+        draw = built ? built : image;
+        if (built && d->engineCache) {
+            PdfDarkModeEngineCacheStoreProcessed(ctx, d->engineCache, image, d->profileHash,
+                                                 DarkImagePolicy::ThemeRecolor, DarkImageKind::Photo, built);
+        }
+    }
+    fz_try(ctx) {
+        fz_fill_image(ctx, d->inner, draw, ctm, alpha, color_params);
+    }
+    fz_always(ctx) {
+        if (cached) {
+            fz_drop_image(ctx, cached);
+        }
+        if (built) {
+            fz_drop_image(ctx, built);
+        }
+    }
+    fz_catch(ctx) {
+        fz_fill_image(ctx, d->inner, image, ctm, alpha, color_params);
+    }
+    return true;
+}
+
 static void v2_fill_image(fz_context* ctx, fz_device* dev, fz_image* image, fz_matrix ctm, float alpha,
                           fz_color_params color_params) {
     pdf_dark_mode_v2_device* d = (pdf_dark_mode_v2_device*)dev;
     if (!image) {
         fz_fill_image(ctx, d->inner, image, ctm, alpha, color_params);
+        return;
+    }
+    if (v2_fill_image_with_strategy(ctx, d, image, ctm, alpha, color_params)) {
         return;
     }
     float coverage = v2_image_coverage(ctm, d->pageBounds);

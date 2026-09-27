@@ -60,6 +60,10 @@ RectF MergeHighlightLineRect(RectF a, RectF b);
 // Build one highlight rect for a run of glyph boxes on the same line.
 Rect BuildHighlightLineRect(Rect* c0, Rect* cEnd);
 
+// True when c starts the next visual line. Joined CJK paragraph lines have no
+// zero-width separator; a superscript still overlaps its base glyph.
+bool GlyphJumpsToNextBandLine(const Rect& band, const Rect& c);
+
 // Align highlight band height for rects on the same text line (page coordinates).
 void NormalizeHighlightLineHeights(Vec<RectF>& rects);
 

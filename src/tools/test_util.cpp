@@ -23,6 +23,7 @@ extern void HtmlPullParser_UnitTests();
 extern void JsonTest();
 extern void OcrTextMerge_UnitTests();
 extern void EbookImagePaper_UnitTests();
+extern void FlattenedCutout_UnitTests();
 extern void SettingsUtilTest();
 extern void SimpleLogTest();
 extern void SquareTreeTest();
@@ -87,6 +88,7 @@ int main(int argc, char** argv) {
     JsonTest();
     OcrTextMerge_UnitTests();
     EbookImagePaper_UnitTests();
+    FlattenedCutout_UnitTests();
     SettingsUtilTest();
     SimpleLogTest();
     SquareTreeTest();

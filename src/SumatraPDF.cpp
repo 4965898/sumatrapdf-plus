@@ -974,6 +974,7 @@ void UpdateTabFileDisplayStateForTab(WindowTab* tab) {
     fs->displayFilterBrightness = tab->displayFilterBrightness;
     fs->displayFilterContrast = tab->displayFilterContrast;
     fs->displayFilterSharpness = tab->displayFilterSharpness;
+    fs->autoOcrOn = tab->autoOcrOn;
 }
 
 static bool gForceRtl = false;
@@ -1871,30 +1872,10 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
         if (tabColParsed->parsedOk) {
             tab->tabColor = tabColParsed->col;
         }
-        tab->displayFilterMode = fs->displayFilterMode;
-        tab->displayFilterBrightness = fs->displayFilterBrightness;
-        tab->displayFilterContrast = fs->displayFilterContrast;
-        tab->displayFilterSharpness = fs->displayFilterSharpness;
-        // Migrate pre-mode FileState: non-zero sliders without a mode → was Legacy.
-        if (tab->displayFilterMode == 0 && (tab->displayFilterBrightness != 0 || tab->displayFilterContrast != 0 ||
-                                            tab->displayFilterSharpness != 0)) {
-            tab->displayFilterMode = (int)DocumentEnhancementMode::Auto;
-            tab->displayFilterBrightness = 0;
-            tab->displayFilterContrast = 0;
-            tab->displayFilterSharpness = 0;
-        }
-        // Collapse old on-states (Legacy/Reading/Scanned) into Auto.
-        if (tab->displayFilterMode == (int)DocumentEnhancementMode::Reading ||
-            tab->displayFilterMode == (int)DocumentEnhancementMode::Scanned ||
-            tab->displayFilterMode == (int)DocumentEnhancementMode::Legacy) {
-            tab->displayFilterMode = (int)DocumentEnhancementMode::Auto;
-            tab->displayFilterBrightness = 0;
-            tab->displayFilterContrast = 0;
-            tab->displayFilterSharpness = 0;
-        }
-        if (tab->displayFilterMode == (int)DocumentEnhancementMode::Auto) {
-            tab->displayFilterLastMode = (int)DocumentEnhancementMode::Auto;
-        }
+        RestoreDisplayFilterForTab(tab, fs);
+    } else {
+        // No remembered row for this file: wand off. Do not keep the previous book's.
+        RestoreDisplayFilterForTab(tab, nullptr);
     }
 
     AbortFinding(args->win, true);
@@ -1910,6 +1891,9 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
     tab->ctrl = ctrl;
     win->ctrl = tab->ctrl;
     ApplyAutoOcrDefaultForTab(tab);
+    if (fs) {
+        tab->autoOcrOn = fs->autoOcrOn;
+    }
     if (gOcrAutoBench) {
         // automation hook: start the all-pages OCR once per process. Saving the
         // searchable PDF reloads the document, which would re-post the command
@@ -2506,6 +2490,11 @@ void ReloadDocument(MainWindow* win, bool autoRefresh) {
     }
     fs->windowState = wstate;
     fs->useDefaultState = false;
+    // NewFileState starts the wand off. Keep this book's pressed state across reload.
+    fs->displayFilterMode = tab->displayFilterMode;
+    fs->displayFilterBrightness = tab->displayFilterBrightness;
+    fs->displayFilterContrast = tab->displayFilterContrast;
+    fs->displayFilterSharpness = tab->displayFilterSharpness;
 
     LoadArgs args(tab->filePath, win);
     args.showWin = true;
@@ -3720,6 +3709,19 @@ static void AttachDocumentToBackgroundTab(LoadArgs* args, WindowTab* tab) {
     tab->ctrl = ctrl;
     args->ctrl = nullptr;
     ApplyAutoOcrDefaultForTab(tab);
+    if (gGlobalPrefs->rememberStatePerDocument) {
+        FileState* ocrFs = gFileHistory.FindByPath(fullPath);
+        if (ocrFs && !ocrFs->useDefaultState) {
+            tab->autoOcrOn = ocrFs->autoOcrOn;
+        }
+        FileState* filterFs = ocrFs;
+        if (filterFs && filterFs->useDefaultState) {
+            filterFs = nullptr;
+        }
+        RestoreDisplayFilterForTab(tab, filterFs);
+    } else {
+        RestoreDisplayFilterForTab(tab, nullptr);
+    }
     StampTabReflowThemeEpoch(tab);
     EngineMupdfSetReflowLoadWhenForeground(tab->GetEngine(), false);
 
@@ -5246,19 +5248,22 @@ void UpdateDocumentColors(bool rerender, bool updateReflowDocuments) {
     static int s_lastPreservePdfImagesMinSize = -1;
     static int s_lastPdfDarkModeRenderer = -1;
     static int s_lastPdfDocumentColorMode = -1;
+    static int s_lastImageDarkStrategy = -1;
     static bool s_lastThemeUsesDarkChrome = false;
     static bool s_lastThemeUsesOriginalPageColors = false;
     bool preservePdfImages = PdfSmartModePreservesEmbeddedImages();
     int preserveMinSize = preservePdfImages ? GetPreservePdfImagesMinSize() : 0;
     int pdfDarkModeRenderer = (int)GetPdfDarkModeRenderer();
     int pdfDocumentColorMode = (int)GetPdfDocumentColorMode();
+    int imageDarkStrategy = (int)GetPdfImageDarkStrategy();
     bool themeUsesDarkChrome = ThemeUsesDarkChrome();
     bool themeUsesOriginalPageColors = ThemeUsesOriginalPageColors();
 
     if ((text == gRenderCache->textColor) && (bg == gRenderCache->backgroundColor) &&
         (link == gRenderCache->linkColor) && preservePdfImages == s_lastPreservePdfImagesInDarkMode &&
         preserveMinSize == s_lastPreservePdfImagesMinSize && pdfDarkModeRenderer == s_lastPdfDarkModeRenderer &&
-        pdfDocumentColorMode == s_lastPdfDocumentColorMode && themeUsesDarkChrome == s_lastThemeUsesDarkChrome &&
+        pdfDocumentColorMode == s_lastPdfDocumentColorMode && imageDarkStrategy == s_lastImageDarkStrategy &&
+        themeUsesDarkChrome == s_lastThemeUsesDarkChrome &&
         themeUsesOriginalPageColors == s_lastThemeUsesOriginalPageColors) {
         return; // colors didn't change
     }
@@ -5266,6 +5271,7 @@ void UpdateDocumentColors(bool rerender, bool updateReflowDocuments) {
     s_lastPreservePdfImagesMinSize = preserveMinSize;
     s_lastPdfDarkModeRenderer = pdfDarkModeRenderer;
     s_lastPdfDocumentColorMode = pdfDocumentColorMode;
+    s_lastImageDarkStrategy = imageDarkStrategy;
     s_lastThemeUsesDarkChrome = themeUsesDarkChrome;
     s_lastThemeUsesOriginalPageColors = themeUsesOriginalPageColors;
 
@@ -5596,7 +5602,7 @@ static void StartDeskewAllScannedPages(MainWindow* win) {
         return;
     }
     EngineBase* engine = win->AsFixed()->GetEngine();
-    if (engine->kind != kindEngineMupdf) {
+    if (!EngineMupdfCanAdjustPageView(engine)) {
         return;
     }
     gDeskewAllRunning = true;
@@ -11095,7 +11101,7 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             break;
 
         case CmdDeskewPage:
-            if (dm) {
+            if (dm && EngineMupdfCanAdjustPageView(dm->GetEngine())) {
                 int pageNo = dm->CurrentPageNo();
                 EngineBase* engine = dm->GetEngine();
                 float cur = EngineMupdfGetPageDeskewDeg(engine, pageNo);
@@ -11110,6 +11116,11 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                     deskewMsg = _TRA("This page is not skewed.");
                     if (deg != 0.f) {
                         deskewMsg = str::FormatTemp(_TRA("Deskewed by %.1f degrees."), deg);
+                    }
+                    if (fabsf(fabsf(deg) - 90.f) <= 1.f) {
+                        ScrollState state = dm->GetScrollState();
+                        dm->Relayout(dm->GetZoomVirtual(), dm->GetRotation());
+                        dm->SetScrollState(state);
                     }
                 }
                 gRenderCache->CancelRendering(dm);
@@ -11319,6 +11330,13 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             if (tab) {
                 tab->autoOcrOn = !tab->autoOcrOn;
                 UpdateAutoOcrToolbarButton(win);
+                if (gGlobalPrefs && gGlobalPrefs->rememberStatePerDocument && tab->filePath) {
+                    FileState* fs = gFileHistory.FindByName(tab->filePath, nullptr);
+                    if (fs) {
+                        fs->autoOcrOn = tab->autoOcrOn;
+                        SaveSettings();
+                    }
+                }
                 if (tab->autoOcrOn && win->ctrl) {
                     OcrScheduleForPage(win, win->ctrl->CurrentPageNo());
                 }
@@ -11978,6 +11996,28 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             SaveSettings();
             break;
 
+        case CmdSetDocumentImageDarkAuto:
+        case CmdSetDocumentImageDarkOriginal:
+        case CmdSetDocumentImageDarkTone:
+            if (NeedsDocumentColorModeUI(win) && ThemeUsesDarkChrome()) {
+                PdfImageDarkStrategy strategy = PdfImageDarkStrategy::Auto;
+                if (cmdId == CmdSetDocumentImageDarkOriginal) {
+                    strategy = PdfImageDarkStrategy::Original;
+                } else if (cmdId == CmdSetDocumentImageDarkTone) {
+                    strategy = PdfImageDarkStrategy::Tone;
+                }
+                SetPdfImageDarkStrategy(strategy);
+                if (GetPdfDocumentColorMode() == PdfDocumentColorMode::Light) {
+                    SetPdfDocumentColorMode(PdfDocumentColorMode::Auto);
+                }
+                UpdateDocumentColors(true);
+                for (MainWindow* w : gWindows) {
+                    UpdatePdfDocumentColorModeToolbarButton(w);
+                }
+                SaveSettings();
+            }
+            break;
+
         case CmdSetPdfDocumentColorModeAuto:
         case CmdSetPdfDocumentColorModeBlack:
         case CmdSetPdfDocumentColorModeLight:
@@ -12185,6 +12225,7 @@ static void ClearAllHighlights(MainWindow* win) {
 // with a direct DialogBox call right after TrackPopupMenu returns.
 static int gCaptionMenuTrackDepth = 0;
 static int gPendingSmartBilingualKind = -1; // -1 = none; else SmartBilingualKind
+static int gPendingMultilingualSettings = 0;
 static int gPendingSpeedFocusChinese = -2;  // -2 = none; 0/1 = focus English/Chinese
 static void FlushPendingReadAloudDialogs(MainWindow* win);
 
@@ -13129,6 +13170,104 @@ static bool TtsSmartBilingualAvailable(SmartBilingualKind kind) {
     return haveZh || haveEn;
 }
 
+static bool IsMultilingualTtsVoice(const TtsVoiceInfo& voice) {
+    return GetTtsVoiceGroup(voice.name) == TtsVoiceGroup::OnlineMultilingual;
+}
+
+static bool IsMultilingualVoiceId(const char* voiceId) {
+    if (str::IsEmpty(voiceId) || str::Eq(voiceId, kTtsMultilingualVoiceId)) {
+        return false;
+    }
+    Vec<TtsVoiceInfo> voices = TtsGetVoices();
+    bool found = false;
+    for (TtsVoiceInfo& voice : voices) {
+        if (str::Eq(voice.id, voiceId) && IsMultilingualTtsVoice(voice)) {
+            found = true;
+            break;
+        }
+    }
+    TtsFreeVoices(voices);
+    return found;
+}
+
+static bool IsMultilingualModeSelected() {
+    if (!gGlobalPrefs) {
+        return false;
+    }
+    const char* id = gGlobalPrefs->readAloudVoiceId;
+    return str::Eq(id, kTtsMultilingualVoiceId) || IsMultilingualVoiceId(id);
+}
+
+static bool TtsMultilingualAvailable() {
+    Vec<TtsVoiceInfo> voices = TtsGetVoices();
+    bool found = false;
+    for (TtsVoiceInfo& voice : voices) {
+        if (IsMultilingualTtsVoice(voice)) {
+            found = true;
+            break;
+        }
+    }
+    TtsFreeVoices(voices);
+    return found;
+}
+
+// A voice chosen from the old submenu is stored as a real id. Fold that into
+// the multilingual mode so the menu can show one choice plus settings.
+static void NormalizeMultilingualVoicePref() {
+    if (!gGlobalPrefs) {
+        return;
+    }
+    const char* id = gGlobalPrefs->readAloudVoiceId;
+    if (!IsMultilingualVoiceId(id)) {
+        return;
+    }
+    if (str::IsEmpty(gGlobalPrefs->readAloudMultilingualVoice)) {
+        str::ReplaceWithCopy(&gGlobalPrefs->readAloudMultilingualVoice, id);
+    }
+    str::ReplaceWithCopy(&gGlobalPrefs->readAloudVoiceId, kTtsMultilingualVoiceId);
+    SaveSettings();
+}
+
+static void AutoFillMultilingualVoicePrefIfEmpty() {
+    if (!gGlobalPrefs || !str::IsEmpty(gGlobalPrefs->readAloudMultilingualVoice)) {
+        return;
+    }
+    if (IsMultilingualVoiceId(gGlobalPrefs->readAloudVoiceId)) {
+        str::ReplaceWithCopy(&gGlobalPrefs->readAloudMultilingualVoice, gGlobalPrefs->readAloudVoiceId);
+        return;
+    }
+    Vec<TtsVoiceInfo> voices = TtsGetVoices();
+    for (TtsVoiceInfo& voice : voices) {
+        if (IsMultilingualTtsVoice(voice)) {
+            str::ReplaceWithCopy(&gGlobalPrefs->readAloudMultilingualVoice, voice.id);
+            break;
+        }
+    }
+    TtsFreeVoices(voices);
+}
+
+static void ReadAloudApplyMultilingualVoice(const char* voiceId) {
+    if (!gGlobalPrefs || str::IsEmpty(voiceId)) {
+        return;
+    }
+    bool active = IsMultilingualModeSelected();
+    bool samePref = str::Eq(gGlobalPrefs->readAloudMultilingualVoice, voiceId);
+    bool modeIsPseudo = str::Eq(gGlobalPrefs->readAloudVoiceId, kTtsMultilingualVoiceId);
+    if (samePref && (!active || modeIsPseudo)) {
+        return;
+    }
+
+    str::ReplaceWithCopy(&gGlobalPrefs->readAloudMultilingualVoice, voiceId);
+    if (!active) {
+        return;
+    }
+    if (!modeIsPseudo) {
+        str::ReplaceWithCopy(&gGlobalPrefs->readAloudVoiceId, kTtsMultilingualVoiceId);
+    }
+    TtsSetVoiceById(voiceId);
+    ReadAloudRestartSpeakingFromCurrentPosition(gReadAloudSourceTab);
+}
+
 // fills empty zh/en prefs with the first matching voice for each language
 static void AutoFillSmartBilingualVoicePrefsIfEmpty(SmartBilingualKind kind) {
     char** zhPref = SmartBilingualZhPref(kind);
@@ -13557,6 +13696,209 @@ static void ShowReadAloudSmartVoiceDialog(MainWindow* win, SmartBilingualKind ki
     ShowWindow(hwnd, SW_SHOW);
 }
 
+struct Dialog_ReadAloudMultilingual_Data {
+    Vec<char*> ownedVoiceIds;
+    char* originalVoiceId = nullptr;
+    AppDialogBrushes brushes;
+};
+
+static HWND gMultilingualHwnd = nullptr;
+
+static void FreeReadAloudMultilingualDialogData(Dialog_ReadAloudMultilingual_Data* data) {
+    if (!data) {
+        return;
+    }
+    for (char* id : data->ownedVoiceIds) {
+        str::Free(id);
+    }
+    data->ownedVoiceIds.Reset();
+    str::FreePtr(&data->originalVoiceId);
+}
+
+static void MultilingualThemeRefreshCb(HWND hwnd, void* ctx) {
+    auto* data = (Dialog_ReadAloudMultilingual_Data*)ctx;
+    if (!data) {
+        return;
+    }
+    data->brushes.Recreate();
+    AppDialogApplyChrome(hwnd);
+    RedrawWindow(hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+}
+
+static void FillReadAloudMultilingualCombo(HWND combo, const char* selectedId,
+                                           Dialog_ReadAloudMultilingual_Data* data) {
+    if (!combo || !data) {
+        return;
+    }
+    SendMessageW(combo, CB_RESETCONTENT, 0, 0);
+    Vec<TtsVoiceInfo> voices = TtsGetVoices();
+    int maxDropWidth = 0;
+    HDC hdc = GetDC(combo);
+    HFONT hFont = (HFONT)SendMessageW(combo, WM_GETFONT, 0, 0);
+    HFONT hOld = hFont && hdc ? (HFONT)SelectObject(hdc, hFont) : nullptr;
+    for (TtsVoiceInfo& voice : voices) {
+        if (!IsMultilingualTtsVoice(voice)) {
+            continue;
+        }
+        TempStr detail = str::FormatTemp("%s - %s", voice.name, TtsLangIdToLocaleNameTemp(voice.lang));
+        int idx = (int)SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)ToWStrTemp(detail));
+        if (idx < 0) {
+            continue;
+        }
+        if (hdc) {
+            WCHAR* wdetail = ToWStrTemp(detail);
+            SIZE sz{};
+            GetTextExtentPoint32W(hdc, wdetail, (int)str::Len(wdetail), &sz);
+            if ((int)sz.cx + DpiScale(combo, 24) > maxDropWidth) {
+                maxDropWidth = (int)sz.cx + DpiScale(combo, 24);
+            }
+        }
+        char* id = str::Dup(voice.id);
+        data->ownedVoiceIds.Append(id);
+        SendMessageW(combo, CB_SETITEMDATA, idx, (LPARAM)id);
+        if (str::Eq(voice.id, selectedId)) {
+            SendMessageW(combo, CB_SETCURSEL, idx, 0);
+        }
+    }
+    TtsFreeVoices(voices);
+    if (hOld && hdc) {
+        SelectObject(hdc, hOld);
+    }
+    if (hdc) {
+        ReleaseDC(combo, hdc);
+    }
+    if (SendMessageW(combo, CB_GETCURSEL, 0, 0) < 0 && SendMessageW(combo, CB_GETCOUNT, 0, 0) > 0) {
+        SendMessageW(combo, CB_SETCURSEL, 0, 0);
+    }
+    if (maxDropWidth > 0) {
+        SendMessageW(combo, CB_SETDROPPEDWIDTH, maxDropWidth, 0);
+    }
+}
+
+static void ReadAloudRestoreMultilingualVoice(const char* original) {
+    if (!gGlobalPrefs) {
+        return;
+    }
+    const char* cur = gGlobalPrefs->readAloudMultilingualVoice ? gGlobalPrefs->readAloudMultilingualVoice : "";
+    const char* want = original ? original : "";
+    if (str::Eq(cur, want)) {
+        return;
+    }
+    str::ReplaceWithCopy(&gGlobalPrefs->readAloudMultilingualVoice, want);
+    if (IsMultilingualModeSelected() && !str::IsEmpty(want)) {
+        TtsSetVoiceById(want);
+        ReadAloudRestartSpeakingFromCurrentPosition(gReadAloudSourceTab);
+    }
+}
+
+static INT_PTR CALLBACK Dialog_ReadAloudMultilingual_Proc(HWND hDlg, UINT msg, WPARAM wp, LPARAM lp) {
+    Dialog_ReadAloudMultilingual_Data* data = nullptr;
+    switch (msg) {
+        case WM_INITDIALOG:
+            data = (Dialog_ReadAloudMultilingual_Data*)lp;
+            SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)data);
+            data->brushes.Create();
+            AppDialogApplyChrome(hDlg);
+            RegisterAppDialogForTheme(hDlg, MultilingualThemeRefreshCb, data);
+            SetCurrentModelessDialog(hDlg);
+            HwndSetText(hDlg, _TRA("Online multilingual voice settings"));
+            HwndSetDlgItemText(hDlg, IDC_READ_ALOUD_MULTI_LABEL, _TRA("Voice"));
+            HwndSetDlgItemText(hDlg, IDOK, _TRA("OK"));
+            HwndSetDlgItemText(hDlg, IDCANCEL, _TRA("Cancel"));
+            data->originalVoiceId = str::Dup(gGlobalPrefs && gGlobalPrefs->readAloudMultilingualVoice
+                                                 ? gGlobalPrefs->readAloudMultilingualVoice
+                                                 : "");
+            FillReadAloudMultilingualCombo(GetDlgItem(hDlg, IDC_READ_ALOUD_MULTI), data->originalVoiceId, data);
+            CenterDialog(hDlg);
+            HwndSetFocus(GetDlgItem(hDlg, IDC_READ_ALOUD_MULTI));
+            return FALSE;
+        case WM_CTLCOLORDLG:
+        case WM_CTLCOLORSTATIC:
+        case WM_CTLCOLORBTN: {
+            data = (Dialog_ReadAloudMultilingual_Data*)GetWindowLongPtr(hDlg, GWLP_USERDATA);
+            if (!data) {
+                break;
+            }
+            HBRUSH br = AppDialogCtlColorBrush(msg, wp, lp, data->brushes.background);
+            if (br) {
+                return (INT_PTR)br;
+            }
+            break;
+        }
+        case WM_ACTIVATE:
+            SetCurrentModelessDialog(LOWORD(wp) == WA_INACTIVE ? nullptr : hDlg);
+            return FALSE;
+        case WM_COMMAND:
+            switch (LOWORD(wp)) {
+                case IDOK:
+                    data = (Dialog_ReadAloudMultilingual_Data*)GetWindowLongPtr(hDlg, GWLP_USERDATA);
+                    ReadAloudApplyMultilingualVoice(
+                        ReadAloudSmartVoiceIdFromCombo(GetDlgItem(hDlg, IDC_READ_ALOUD_MULTI)));
+                    SaveSettings();
+                    DestroyWindow(hDlg);
+                    return TRUE;
+                case IDCANCEL:
+                    data = (Dialog_ReadAloudMultilingual_Data*)GetWindowLongPtr(hDlg, GWLP_USERDATA);
+                    if (data) {
+                        ReadAloudRestoreMultilingualVoice(data->originalVoiceId);
+                    }
+                    DestroyWindow(hDlg);
+                    return TRUE;
+                case IDC_READ_ALOUD_MULTI:
+                    if (HIWORD(wp) == CBN_SELCHANGE) {
+                        ReadAloudApplyMultilingualVoice(
+                            ReadAloudSmartVoiceIdFromCombo(GetDlgItem(hDlg, IDC_READ_ALOUD_MULTI)));
+                    }
+                    return TRUE;
+            }
+            break;
+        case WM_CLOSE:
+            data = (Dialog_ReadAloudMultilingual_Data*)GetWindowLongPtr(hDlg, GWLP_USERDATA);
+            if (data) {
+                ReadAloudRestoreMultilingualVoice(data->originalVoiceId);
+            }
+            DestroyWindow(hDlg);
+            return TRUE;
+        case WM_DESTROY:
+            data = (Dialog_ReadAloudMultilingual_Data*)GetWindowLongPtr(hDlg, GWLP_USERDATA);
+            UnregisterAppDialogForTheme(hDlg);
+            if (GetCurrentModelessDialog() == hDlg) {
+                SetCurrentModelessDialog(nullptr);
+            }
+            if (gMultilingualHwnd == hDlg) {
+                gMultilingualHwnd = nullptr;
+            }
+            if (data) {
+                data->brushes.Destroy();
+                SetWindowLongPtr(hDlg, GWLP_USERDATA, 0);
+                FreeReadAloudMultilingualDialogData(data);
+                delete data;
+            }
+            break;
+    }
+    return FALSE;
+}
+
+static void ShowReadAloudMultilingualDialog(MainWindow* win) {
+    if (!win) {
+        return;
+    }
+    if (gMultilingualHwnd && IsWindow(gMultilingualHwnd)) {
+        SetForegroundWindow(gMultilingualHwnd);
+        return;
+    }
+    auto* data = new Dialog_ReadAloudMultilingual_Data();
+    HWND hwnd = CreateAppDialogModeless(IDD_DIALOG_READ_ALOUD_MULTILINGUAL, win->hwndFrame,
+                                        Dialog_ReadAloudMultilingual_Proc, (LPARAM)data);
+    if (!hwnd) {
+        FreeReadAloudMultilingualDialogData(data);
+        delete data;
+        return;
+    }
+    gMultilingualHwnd = hwnd;
+    ShowWindow(hwnd, SW_SHOW);
+}
+
 static void FlushPendingReadAloudDialogs(MainWindow* win) {
     if (!win) {
         return;
@@ -13565,6 +13907,10 @@ static void FlushPendingReadAloudDialogs(MainWindow* win) {
         auto kind = (SmartBilingualKind)gPendingSmartBilingualKind;
         gPendingSmartBilingualKind = -1;
         ShowReadAloudSmartVoiceDialog(win, kind);
+    }
+    if (gPendingMultilingualSettings) {
+        gPendingMultilingualSettings = 0;
+        ShowReadAloudMultilingualDialog(win);
     }
     if (gPendingSpeedFocusChinese >= 0 && gGlobalPrefs) {
         bool focusChinese = gPendingSpeedFocusChinese != 0;
@@ -13859,6 +14205,15 @@ static void ReadAloudApplyVoiceFromSettings() {
     if (TryGetSmartBilingualKind(voiceId, nullptr)) {
         return;
     }
+    if (str::Eq(voiceId, kTtsMultilingualVoiceId)) {
+        AutoFillMultilingualVoicePrefIfEmpty();
+        const char* multi = gGlobalPrefs->readAloudMultilingualVoice;
+        if (!str::IsEmpty(multi)) {
+            TtsSetVoiceById(multi);
+            ReadAloudApplyRateForLang(ReadAloudLangFromVoiceId(multi));
+        }
+        return;
+    }
     TtsSetVoiceById(str::IsEmpty(voiceId) ? "" : voiceId);
     ReadAloudApplyRateForLang(ReadAloudLangFromVoiceId(voiceId));
 }
@@ -13896,6 +14251,11 @@ static void ReadAloudSaveVoicePref(const char* voiceId) {
         AutoFillSmartBilingualVoicePrefsIfEmpty(smartKind);
         InvalidateSmartBilingualVoiceCache();
         if (!ResolveSmartBilingualVoices(smartKind)) {
+            return;
+        }
+    } else if (str::Eq(newVoiceId, kTtsMultilingualVoiceId)) {
+        AutoFillMultilingualVoicePrefIfEmpty();
+        if (str::IsEmpty(gGlobalPrefs->readAloudMultilingualVoice)) {
             return;
         }
     }
@@ -14834,72 +15194,6 @@ static TempStr TtsLangIdToLocaleNameTemp(const char* lang) {
     return ToUtf8Temp(localeName);
 }
 
-// appends voices of the given group, separated by language; command ids encode the
-// index into the TtsGetVoices() vector so display order doesn't matter for selection.
-// returns the number of items added, sets containsCurrent if the current voice is in this group
-static int AppendTtsVoiceGroupItems(HMENU menu, Vec<TtsVoiceInfo>& voices, TtsVoiceGroup group,
-                                    const char* currentVoiceId, bool* containsCurrent) {
-    const char* lastLang = nullptr;
-    int nAdded = 0;
-    int idx = -1;
-    for (TtsVoiceInfo& voice : voices) {
-        idx++;
-        UINT cmd = CmdTtsVoiceFirst + (UINT)idx;
-        if (cmd > CmdTtsVoiceLast) {
-            break;
-        }
-        if (GetTtsVoiceGroup(voice.name) != group) {
-            continue;
-        }
-
-        const char* lang = str::IsEmpty(voice.lang) ? "" : voice.lang;
-        if (lastLang && !str::EqI(lastLang, lang)) {
-            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-        }
-
-        UINT flags = MF_STRING;
-        if (str::Eq(voice.id, currentVoiceId)) {
-            flags |= MF_CHECKED;
-            if (containsCurrent) {
-                *containsCurrent = true;
-            }
-        }
-
-        TempStr localeName = TtsLangIdToLocaleNameTemp(voice.lang);
-        TempStr label = str::FormatTemp("%s - %s", voice.name, localeName);
-        AppendMenuW(menu, flags, cmd, ToWStrTemp(label));
-
-        lastLang = lang;
-        nAdded++;
-    }
-    return nAdded;
-}
-
-// appends an "online voices" style submenu; checked when the current voice is inside
-static bool AppendTtsVoiceSubmenu(HMENU voiceMenu, Vec<TtsVoiceInfo>& voices, TtsVoiceGroup group,
-                                  const char* currentVoiceId, const char* title, bool separatorBefore) {
-    HMENU sub = CreatePopupMenu();
-    if (!sub) {
-        return false;
-    }
-    bool containsCurrent = false;
-    int n = AppendTtsVoiceGroupItems(sub, voices, group, currentVoiceId, &containsCurrent);
-    if (n == 0) {
-        DestroyMenu(sub);
-        return false;
-    }
-    RemoveBadMenuSeparators(sub);
-    if (separatorBefore) {
-        AppendMenuW(voiceMenu, MF_SEPARATOR, 0, nullptr);
-    }
-    UINT flags = MF_POPUP | MF_STRING;
-    if (containsCurrent) {
-        flags |= MF_CHECKED;
-    }
-    AppendMenuW(voiceMenu, flags, (UINT_PTR)sub, ToWStrTemp(title));
-    return true;
-}
-
 static void BuildReadAloudVoiceMenuItems(HMENU voiceMenu) {
     if (!voiceMenu) {
         return;
@@ -14921,8 +15215,8 @@ static void BuildReadAloudVoiceMenuItems(HMENU voiceMenu) {
 
     AppendMenuW(voiceMenu, defaultFlags, CmdTtsVoiceDefault, ToWStrTemp(_TRA("System default")));
 
-    Vec<TtsVoiceInfo> voices = TtsGetVoices();
     if (TtsSmartBilingualAvailable(SmartBilingualKind::Local)) {
+        AppendMenuW(voiceMenu, MF_SEPARATOR, 0, nullptr);
         UINT smartFlags = MF_STRING;
         if (isSmartBilingual && activeSmartKind == SmartBilingualKind::Local) {
             smartFlags |= MF_CHECKED;
@@ -14944,12 +15238,23 @@ static void BuildReadAloudVoiceMenuItems(HMENU voiceMenu) {
                     ToWStrTemp(_TRA("Online smart bilingual settings...")));
     }
 
-    // individual online voices are chosen via online smart bilingual settings;
-    // multilingual voices remain listed for direct selection
-    AppendTtsVoiceSubmenu(voiceMenu, voices, TtsVoiceGroup::OnlineMultilingual, currentVoiceId,
-                          _TRA("Online multilingual voices"), true);
+    // One choice plus settings, same shape as the bilingual items. A voice
+    // saved by the old submenu is folded into that choice here.
+    NormalizeMultilingualVoicePref();
+    if (gGlobalPrefs && gGlobalPrefs->readAloudVoiceId) {
+        currentVoiceId = gGlobalPrefs->readAloudVoiceId;
+    }
+    if (TtsMultilingualAvailable()) {
+        AppendMenuW(voiceMenu, MF_SEPARATOR, 0, nullptr);
+        UINT multiFlags = MF_STRING;
+        if (str::Eq(currentVoiceId, kTtsMultilingualVoiceId)) {
+            multiFlags |= MF_CHECKED;
+        }
+        AppendMenuW(voiceMenu, multiFlags, CmdTtsVoiceMultilingual, ToWStrTemp(_TRA("Online multilingual voices")));
+        AppendMenuW(voiceMenu, MF_STRING, CmdTtsMultilingualSettings,
+                    ToWStrTemp(_TRA("Online multilingual voice settings...")));
+    }
 
-    TtsFreeVoices(voices);
     RemoveBadMenuSeparators(voiceMenu);
 }
 
@@ -15207,6 +15512,14 @@ static bool HandleReadAloudMenuSelection(MainWindow* win, UINT selected) {
         } else {
             ShowReadAloudSmartVoiceDialog(win, SmartBilingualKind::Online);
         }
+    } else if (selected == CmdTtsVoiceMultilingual) {
+        ReadAloudSaveVoicePref(kTtsMultilingualVoiceId);
+    } else if (selected == CmdTtsMultilingualSettings) {
+        if (gCaptionMenuTrackDepth > 0) {
+            gPendingMultilingualSettings = 1;
+        } else {
+            ShowReadAloudMultilingualDialog(win);
+        }
     } else if (selected >= CmdTtsVoiceFirst && selected <= CmdTtsVoiceLast) {
         Vec<TtsVoiceInfo> voices = TtsGetVoices();
         int voiceIndex = (int)(selected - CmdTtsVoiceFirst);
@@ -15264,6 +15577,7 @@ static void ShowReadAloudPopupMenuAt(MainWindow* win, int x, int y) {
 bool HandleReadAloudMenuCommand(MainWindow* win, int cmdId) {
     if (cmdId == CmdTtsVoiceDefault || cmdId == CmdTtsVoiceSmartBilingual || cmdId == CmdTtsSmartBilingualSettings ||
         cmdId == CmdTtsVoiceSmartOnlineBilingual || cmdId == CmdTtsSmartOnlineBilingualSettings ||
+        cmdId == CmdTtsVoiceMultilingual || cmdId == CmdTtsMultilingualSettings ||
         (cmdId >= CmdTtsMenuReadCurrentPage && cmdId <= CmdTtsMenuStopReading) ||
         (cmdId >= CmdTtsVoiceFirst && cmdId <= CmdTtsVoiceLast) ||
         (cmdId >= CmdTtsSpeedZhFirst && cmdId <= CmdTtsSpeedZhLast) ||
@@ -15285,6 +15599,58 @@ static void ShowTtsVoiceMenu(MainWindow* win, NMTOOLBARW* nmtb) {
     MapWindowPoints(nmtb->hdr.hwndFrom, HWND_DESKTOP, (POINT*)&rc, 2);
 
     ShowReadAloudPopupMenuAt(win, rc.left, rc.bottom);
+}
+
+static PdfImageDarkStrategy SavedImageDarkStrategy() {
+    const char* v = gGlobalPrefs ? gGlobalPrefs->documentImageDarkStrategy : nullptr;
+    if (str::EqI(v, "original")) {
+        return PdfImageDarkStrategy::Original;
+    }
+    if (str::EqI(v, "simple") || str::EqI(v, "tone")) {
+        return PdfImageDarkStrategy::Tone;
+    }
+    return PdfImageDarkStrategy::Auto;
+}
+
+static void AppendImageDarkItem(HMENU menu, UINT cmd, const char* label, PdfImageDarkStrategy item,
+                                PdfImageDarkStrategy current, bool enabled) {
+    UINT flags = MF_STRING;
+    if (item == current) {
+        flags |= MF_CHECKED;
+    }
+    if (!enabled) {
+        flags |= MF_GRAYED;
+    }
+    AppendMenuW(menu, flags, cmd, ToWStrTemp(_TRA(label)));
+}
+
+static void ShowDocumentImageDarkMenu(MainWindow* win, NMTOOLBARW* nmtb) {
+    if (!win || !nmtb || nmtb->iItem != CmdSetPdfDocumentColorModeBlack) {
+        return;
+    }
+    RECT rc{};
+    SendMessageW(nmtb->hdr.hwndFrom, TB_GETRECT, CmdSetPdfDocumentColorModeBlack, (LPARAM)&rc);
+    MapWindowPoints(nmtb->hdr.hwndFrom, HWND_DESKTOP, (POINT*)&rc, 2);
+    HMENU menu = CreatePopupMenu();
+    if (!menu) {
+        return;
+    }
+    bool enabled = ThemeUsesDarkChrome() && NeedsDocumentColorModeUI(win);
+    PdfImageDarkStrategy current = SavedImageDarkStrategy();
+    AppendImageDarkItem(menu, CmdSetDocumentImageDarkAuto, "Images: Automatic", PdfImageDarkStrategy::Auto, current,
+                        enabled);
+    AppendImageDarkItem(menu, CmdSetDocumentImageDarkTone, "Images: Smart Invert", PdfImageDarkStrategy::Tone, current,
+                        enabled);
+    AppendImageDarkItem(menu, CmdSetDocumentImageDarkOriginal, "Images: Keep Original Colors",
+                        PdfImageDarkStrategy::Original, current, enabled);
+    SetForegroundWindow(win->hwndFrame);
+    UINT selected = (UINT)TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, rc.left, rc.bottom, 0,
+                                         win->hwndFrame, nullptr);
+    DestroyMenu(menu);
+    if (selected == 0) {
+        return;
+    }
+    SendMessageW(win->hwndFrame, WM_COMMAND, selected, 0);
 }
 
 static void ShowOcrToolbarMenu(MainWindow* win, NMTOOLBARW* nmtb) {
@@ -15309,7 +15675,7 @@ static void ShowOcrToolbarMenu(MainWindow* win, NMTOOLBARW* nmtb) {
     AppendMenuW(menu, canOcr ? MF_STRING : MF_STRING | MF_GRAYED, CmdOcrReRecognizeAllPages,
                 ToWStrTemp(_TRA("Recognize All Scanned Pages (Accurate)")));
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    bool canDeskew = engine && engine->kind == kindEngineMupdf;
+    bool canDeskew = EngineMupdfCanAdjustPageView(engine);
     AppendMenuW(menu, canDeskew ? MF_STRING : MF_STRING | MF_GRAYED, CmdDeskewPage, ToWStrTemp(_TRA("Deskew Page")));
     AppendMenuW(menu, canDeskew ? MF_STRING : MF_STRING | MF_GRAYED, CmdDeskewAllScannedPages,
                 ToWStrTemp(_TRA("Deskew All Scanned Pages")));
@@ -15318,7 +15684,7 @@ static void ShowOcrToolbarMenu(MainWindow* win, NMTOOLBARW* nmtb) {
     if (gGlobalPrefs && gGlobalPrefs->ocrDeskew) {
         deskewFlags |= MF_CHECKED;
     }
-    if (!canOcr) {
+    if (!canOcr || !canDeskew) {
         deskewFlags |= MF_GRAYED;
     }
     AppendMenuW(menu, deskewFlags, CmdToggleOcrDeskew, ToWStrTemp(_TRA("Deskew during OCR")));
@@ -15852,6 +16218,8 @@ LRESULT CALLBACK WndProcSumatraFrame(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                 NMTOOLBARW* nmtb = (NMTOOLBARW*)lp;
                 if (nmtb->iItem == CmdToggleAutoOcr) {
                     ShowOcrToolbarMenu(win, nmtb);
+                } else if (nmtb->iItem == CmdSetPdfDocumentColorModeBlack) {
+                    ShowDocumentImageDarkMenu(win, nmtb);
                 } else {
                     ShowTtsVoiceMenu(win, nmtb);
                 }

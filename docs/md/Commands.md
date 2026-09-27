@@ -97,6 +97,9 @@ CmdToggleLightDarkTheme,,Toggle Light/Dark Theme,Toolbar button and command pale
 CmdSetPdfDocumentColorModeAuto,,Set Document Color Mode: Smart,"Toolbar button; smart color adaptation for any readable document, ver 3.7+"
 CmdSetPdfDocumentColorModeBlack,,Set Document Color Mode: Match Theme,"Toolbar button; match current theme colors for document content, ver 3.7+"
 CmdSetPdfDocumentColorModeLight,,Set Document Color Mode: Original,"Toolbar button; original document colors unchanged, ver 3.7+"
+CmdSetDocumentImageDarkAuto,,Images: Automatic,"Dark theme image menu; classify each picture, ver 3.7+"
+CmdSetDocumentImageDarkOriginal,,Images: Keep Original Colors,"Dark theme image menu; draw picture pixels unchanged, ver 3.7+"
+CmdSetDocumentImageDarkTone,,Images: Smart Invert,"Dark theme image menu; keep hue and reseat lightness onto the theme, ver 3.7+"
 CmdToggleDoubleClickWordLookup,,Toggle Double-Click Word Lookup,"Toolbar button and command palette; toggles EnableDoubleClickWordLookup advanced setting, ver 3.7+"
 CmdEbookFontSizeDecrease,,Ebook Font Size: Decrease,"Toolbar button and command palette; decreases reflowable ebook font size and reloads the document, ver 3.7+"
 CmdEbookFontSizeIncrease,,Ebook Font Size: Increase,"Toolbar button and command palette; increases reflowable ebook font size and reloads the document, ver 3.7+"
@@ -247,7 +250,7 @@ CmdPdShowInfo,,Show PDF Info,shows information about currently opened PDF file
 CmdDocumentShowOutline,,Show Document Outline,shows the outline (table of contents) of currently opened document
 CmdPdfBake,,Bake PDF File,bakes interactive form and annotation content into static graphics; saves to a new PDF file and opens it
 CmdDocumentExtractText,,Extract Text From Document,"extract text from document pages to a .txt file, with configurable page ranges, ver 3.7+"
-CmdPdfRotatePages,,Rotate PDF Pages...,"rotate a selected PDF page range and save the changes, ver 3.8+"
+CmdPdfRotatePages,,Manually Adjust Pages...,"turn, flip, or crop PDF pages by any angle and save the changes, ver 3.8+"
 CmdOcrCurrentPage,,Recognize Current Page,"recognize the current page (high accuracy), even if it already has a text layer. Memory cache only; does not change the PDF file, ver 3.8+"
 CmdOcrDocument,,Recognize All Scanned Pages (Fast),"toolbar OCR menu: clear session OCR and re-recognize every page with the fast profile; then extract bookmarks (in memory, replaces existing outline), ver 3.8+"
 CmdToggleAutoOcr,,Toggle Auto OCR,"toolbar switch for AutoOcrScanPages: OCR visible scanned pages as you view them, ver 3.8+"

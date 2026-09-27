@@ -128,14 +128,56 @@ static void SaveDisplayFilterToFileState(WindowTab* tab) {
     if (!tab || !tab->filePath || !gGlobalPrefs || !gGlobalPrefs->rememberStatePerDocument) {
         return;
     }
-    FileState* fs = gFileHistory.FindByName(tab->filePath, nullptr);
+    FileState* fs = gFileHistory.FindByPath(tab->filePath);
     if (!fs) {
-        return;
+        fs = NewFileState(tab->filePath);
+        gFileHistory.Append(fs);
     }
+    // A brand-new history row starts as use-default, which the next open ignores.
+    // The wand is per book, so this row must be applied next time.
+    fs->useDefaultState = false;
     fs->displayFilterMode = tab->displayFilterMode;
     fs->displayFilterBrightness = tab->displayFilterBrightness;
     fs->displayFilterContrast = tab->displayFilterContrast;
     fs->displayFilterSharpness = tab->displayFilterSharpness;
+}
+
+void RestoreDisplayFilterForTab(WindowTab* tab, FileState* fs) {
+    if (!tab) {
+        return;
+    }
+    int mode = 0;
+    int brightness = 0;
+    int contrast = 0;
+    int sharpness = 0;
+    if (fs && gGlobalPrefs && gGlobalPrefs->rememberStatePerDocument && !fs->useDefaultState) {
+        mode = fs->displayFilterMode;
+        brightness = fs->displayFilterBrightness;
+        contrast = fs->displayFilterContrast;
+        sharpness = fs->displayFilterSharpness;
+    }
+    // Migrate pre-mode FileState: non-zero sliders without a mode → was Legacy.
+    if (mode == 0 && (brightness != 0 || contrast != 0 || sharpness != 0)) {
+        mode = (int)DocumentEnhancementMode::Auto;
+        brightness = 0;
+        contrast = 0;
+        sharpness = 0;
+    }
+    // Collapse old on-states (Legacy/Reading/Scanned) into Auto. Still on.
+    if (mode == (int)DocumentEnhancementMode::Reading || mode == (int)DocumentEnhancementMode::Scanned ||
+        mode == (int)DocumentEnhancementMode::Legacy) {
+        mode = (int)DocumentEnhancementMode::Auto;
+        brightness = 0;
+        contrast = 0;
+        sharpness = 0;
+    }
+    tab->displayFilterMode = mode;
+    tab->displayFilterBrightness = brightness;
+    tab->displayFilterContrast = contrast;
+    tab->displayFilterSharpness = sharpness;
+    if (mode == (int)DocumentEnhancementMode::Auto) {
+        tab->displayFilterLastMode = (int)DocumentEnhancementMode::Auto;
+    }
 }
 
 void SetDisplayFilterForTab(WindowTab* tab, const DisplayFilterParams& pIn, bool saveAndRepaint) {

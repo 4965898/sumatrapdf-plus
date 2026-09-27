@@ -6,6 +6,8 @@ extern "C" {
 }
 
 #include "utils/BaseUtil.h"
+#include "utils/Timer.h"
+#include "utils/Log.h"
 
 #include "Theme.h"
 #include "PdfDarkModeInternal.h"
@@ -49,6 +51,30 @@ static bool dm_should_use_government_paper_pixmap(fz_context* ctx, fz_image* src
 // not per-pixel AdaptiveDocument (JPEG grain becomes white speckles on dark theme).
 static bool dm_fullpage_low_chroma_text_scan(const DarkImageFeatures& f) {
     return PdfDarkModeFeaturesLookLikeFullPageTextScanForBinarize(f);
+}
+
+// Smart invert's photo pipeline decodes the native image and looks for faces.
+// These pages have no face to restore. Keep the lighter document processors.
+static bool dm_smart_invert_use_document_processor(fz_context* ctx, fz_image* srcImage,
+                                                   const DarkImageAnalysis* imgAnalysis, float pageCoverage) {
+    if (!imgAnalysis || pageCoverage < kMaxPreserveImagePageCoverage) {
+        return false;
+    }
+    const DarkImageFeatures& f = imgAnalysis->features;
+    if (imgAnalysis->kind == DarkImageKind::Photo || PdfDarkModeFeaturesLookLikeGrayscalePhoto(f)) {
+        return false;
+    }
+    if (dm_should_use_government_paper_pixmap(ctx, srcImage, imgAnalysis, pageCoverage)) {
+        return true;
+    }
+    if (PdfDarkModeFeaturesLookLikeBwLineArtScan(f)) {
+        return true;
+    }
+    if (imgAnalysis->kind == DarkImageKind::IconOrLineArt && f.saturatedPixelRatio < 0.08f) {
+        return true;
+    }
+    return imgAnalysis->kind == DarkImageKind::FullPageScan && dm_fullpage_low_chroma_text_scan(f) &&
+           f.chromaticPixelRatio < 0.12f && f.saturatedPixelRatio < 0.08f;
 }
 
 struct DarkModeShadeCacheEntry {
@@ -202,6 +228,18 @@ static void dm_theme_recolor_pixel(float r, float g, float b, const DarkModePale
     *outB = mapped[2];
 }
 
+// Tone: reseat lightness onto the theme in OKLab. Hue stays, so this is not an RGB
+// dim and not a per-channel invert. White goes to the theme background, black to
+// the theme text.
+static void dm_oklab_theme_pixel(float r, float g, float b, const DarkModePalette& palette, float* outR, float* outG,
+                                 float* outB) {
+    float mapped[3] = {};
+    MapRgbToDarkThemeOklab(r, g, b, palette, mapped);
+    *outR = mapped[0];
+    *outG = mapped[1];
+    *outB = mapped[2];
+}
+
 static void dm_adaptive_pixel(float r, float g, float b, const DarkModePalette& palette, float* outR, float* outG,
                               float* outB) {
     ApplyAdaptiveDocumentDarkMode(r, g, b, palette, outR, outG, outB);
@@ -236,6 +274,48 @@ static bool dm_picture_book_embedded_photo_page(fz_context* ctx, fz_image* srcIm
     }
     // B&W portrait / battlefield photo on a text page — not a red-header band on office paper.
     return PdfDarkModeImageDecodeLooksLikeGrayscalePortrait(ctx, srcImage);
+}
+
+static fz_pixmap* dm_tone_theme_pixmap(fz_context* ctx, fz_pixmap* src, const DarkModePalette& palette) {
+    if (!src || !src->samples) {
+        return src;
+    }
+    // Face restore runs on RGB samples. A CMYK cover used to take the per-pixel
+    // tone path and leave every face inverted.
+    fz_pixmap* rgbSrc = nullptr;
+    fz_pixmap* dst = nullptr;
+    fz_var(rgbSrc);
+    fz_var(dst);
+    fz_try(ctx) {
+        fz_colorspace* cs = src->colorspace ? src->colorspace : fz_device_rgb(ctx);
+        bool fastRgb = cs == fz_device_rgb(ctx) || fz_colorspace_is_rgb(ctx, cs);
+        fz_pixmap* work = src;
+        if (!fastRgb) {
+            rgbSrc = fz_convert_pixmap(ctx, src, fz_device_rgb(ctx), nullptr, nullptr, fz_default_color_params, 1);
+            work = rgbSrc;
+        }
+        int w = work->w;
+        int h = work->h;
+        fz_colorspace* outCs = work->colorspace ? work->colorspace : fz_device_rgb(ctx);
+        dst = fz_new_pixmap(ctx, outCs, w, h, work->seps, work->alpha);
+        fz_copy_pixmap_rect(ctx, dst, work, fz_make_irect(0, 0, w, h), nullptr);
+        if (rgbSrc) {
+            fz_drop_pixmap(ctx, rgbSrc);
+            rgbSrc = nullptr;
+        }
+        if (!PdfDarkModeToneThemeRgbSamples(dst->samples, w, h, dst->n, dst->stride, palette)) {
+            dm_transform_pixmap_rgb(ctx, dst, palette, dm_oklab_theme_pixel);
+        }
+    }
+    fz_always(ctx) {
+        fz_drop_pixmap(ctx, rgbSrc);
+    }
+    fz_catch(ctx) {
+        fz_drop_pixmap(ctx, dst);
+        dst = nullptr;
+        fz_rethrow(ctx);
+    }
+    return dst;
 }
 
 static fz_pixmap* dm_copy_and_transform_pixmap(fz_context* ctx, fz_pixmap* src, const DarkModePalette& palette,
@@ -274,6 +354,84 @@ static fz_pixmap* dm_load_src_pixmap(fz_context* ctx, fz_image* srcImage, int ma
     float s = (float)maxDim / (float)(w > h ? w : h);
     fz_matrix ctm = fz_scale(s, s);
     return fz_get_pixmap_from_image(ctx, srcImage, nullptr, &ctm, nullptr, nullptr);
+}
+
+fz_image* PdfDarkModeRecolorImage(fz_context* ctx, fz_image* srcImage, const DarkModePalette& palette) {
+    if (!ctx || !srcImage) {
+        return nullptr;
+    }
+    fz_pixmap* src = nullptr;
+    fz_pixmap* processed = nullptr;
+    fz_image* result = nullptr;
+    fz_image* asImage = nullptr;
+    fz_var(src);
+    fz_var(processed);
+    fz_var(result);
+    fz_var(asImage);
+    fz_try(ctx) {
+        src = dm_load_src_pixmap(ctx, srcImage, 1600);
+        if (src && src->colorspace && fz_colorspace_is_gray(ctx, src->colorspace)) {
+            fz_pixmap* rgbSrc =
+                fz_convert_pixmap(ctx, src, fz_device_rgb(ctx), nullptr, nullptr, fz_default_color_params, 1);
+            fz_drop_pixmap(ctx, src);
+            src = rgbSrc;
+        }
+        LARGE_INTEGER recolorStart = TimeGet();
+        static int tonePerfFlag = -1;
+        if (tonePerfFlag < 0) {
+            tonePerfFlag = GetEnvironmentVariableA("SUMATRA_TONE_PERF", nullptr, 0) > 0 ? 1 : 0;
+        }
+        bool tonePerf = tonePerfFlag == 1;
+        double analyzeMs = 0;
+        bool document = false;
+        if (src && (srcImage->w >= 700 || srcImage->h >= 700)) {
+            // Classify the pixmap we already decoded. Analyzing srcImage decodes
+            // the JPEG again (about 80 ms on an 800px EPUB picture).
+            LARGE_INTEGER a0 = TimeGet();
+            asImage = fz_new_image_from_pixmap(ctx, src, nullptr);
+            DarkImageAnalysis analysis = PdfDarkModeAnalyzeImageCached(ctx, asImage, 0.95f, true, nullptr);
+            fz_drop_image(ctx, asImage);
+            asImage = nullptr;
+            analyzeMs = TimeSinceInMs(a0);
+            document = dm_smart_invert_use_document_processor(ctx, srcImage, &analysis, 0.95f);
+        }
+        if (document) {
+            processed = PdfDarkModeProcessGovernmentPaperPixmap(ctx, src, palette);
+        } else {
+            processed = dm_tone_theme_pixmap(ctx, src, palette);
+        }
+        if (tonePerf) {
+            logf("tone-recolor src=%dx%d decode=%dx%d document=%d analyze=%.2f total=%.2f ms\n", srcImage->w,
+                 srcImage->h, src ? src->w : 0, src ? src->h : 0, document ? 1 : 0, analyzeMs,
+                 TimeSinceInMs(recolorStart));
+        }
+        if (!processed || processed == src) {
+            fz_drop_pixmap(ctx, src);
+            src = nullptr;
+        } else {
+            fz_drop_pixmap(ctx, src);
+            src = nullptr;
+            result = fz_new_image_from_pixmap(ctx, processed, nullptr);
+            fz_drop_pixmap(ctx, processed);
+            processed = nullptr;
+        }
+    }
+    fz_always(ctx) {
+        if (asImage) {
+            fz_drop_image(ctx, asImage);
+        }
+        if (src) {
+            fz_drop_pixmap(ctx, src);
+        }
+        if (processed) {
+            fz_drop_pixmap(ctx, processed);
+        }
+    }
+    fz_catch(ctx) {
+        fz_report_error(ctx);
+        result = nullptr;
+    }
+    return result;
 }
 
 static fz_image* dm_build_processed_image(fz_context* ctx, fz_image* srcImage, DarkImagePolicy policy,
@@ -318,7 +476,11 @@ static fz_image* dm_build_processed_image(fz_context* ctx, fz_image* srcImage, D
             fz_drop_pixmap(ctx, src);
             src = rgbSrc;
         }
-        if (policy == DarkImagePolicy::Preserve) {
+        PdfImageDarkStrategy forced = GetPdfImageDarkStrategy();
+        if (forced == PdfImageDarkStrategy::Tone &&
+            !dm_smart_invert_use_document_processor(ctx, srcImage, imgAnalysis, pageCoverage)) {
+            processed = dm_tone_theme_pixmap(ctx, src, palette);
+        } else if (policy == DarkImagePolicy::Preserve) {
             if (pageCoverage >= kMaxPreserveImagePageCoverage) {
                 // Soft-cream notebooks: classifier SoftCream → gentle soften only.
                 // RAZ / picture books: sharp dark paper + light text with photo-rect protect.
@@ -556,9 +718,12 @@ fz_image* PdfDarkModeGetCachedFollowThemeImage(fz_context* ctx, DarkModeEngineCa
         return nullptr;
     }
     DarkImageAnalysis analysis{};
+    PdfImageDarkStrategy forced = GetPdfImageDarkStrategy();
+    bool forcePixels = forced == PdfImageDarkStrategy::Tone;
     // Non-full-bleed Preserve (textbook photos): usually draw the original image.
     // Exception: cream/mint callout panels must still remap or they stay bright.
-    if (policy == DarkImagePolicy::Preserve && pageCoverage < kMaxPreserveImagePageCoverage) {
+    // A manual tone choice remaps every image, including those photos.
+    if (!forcePixels && policy == DarkImagePolicy::Preserve && pageCoverage < kMaxPreserveImagePageCoverage) {
         analysis = PdfDarkModeAnalyzeImageCached(ctx, srcImage, pageCoverage, false, engineCache);
         if (!PdfDarkModeFeaturesLookLikeLightDocumentPanel(analysis.features)) {
             return nullptr;

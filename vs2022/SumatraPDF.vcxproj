@@ -1293,6 +1293,8 @@
     <ClCompile Include="..\src\EngineImages.cpp" />
     <ClCompile Include="..\src\EngineMupdf.cpp" />
     <ClCompile Include="..\src\EbookImagePaper.cpp" />
+    <ClCompile Include="..\src\FlattenedCutout.cpp" />
+    <ClCompile Include="..\src\EpubFlattenedCutout.cpp" />
     <ClCompile Include="..\src\DeskewPostl.cpp" />
     <ClCompile Include="..\src\PdfTocEditModel.cpp" />
     <ClCompile Include="..\src\EnginePs.cpp" />
@@ -1414,6 +1416,7 @@
     <ClCompile Include="..\src\UpdateCheck.cpp" />
     <ClCompile Include="..\src\WindowTab.cpp" />
     <ClCompile Include="..\src\OcrOnnx.cpp" />
+    <ClCompile Include="..\src\FaceLandmarkEngine.cpp" />
     <ClCompile Include="..\src\OcrService.cpp" />
     <ClCompile Include="..\src\OcrTextMerge.cpp" />
     <ClCompile Include="..\src\PrintedTocModel.cpp" />

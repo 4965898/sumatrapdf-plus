@@ -45,6 +45,8 @@ static OrtMemoryInfo* gMem = nullptr;
 static OrtAllocator* gAlloc = nullptr;
 static bool gRuntimeTried = false;
 static bool gRuntimeOk = false;
+static bool gOrtTried = false;
+static bool gOrtReady = false;
 static bool gForceProfile = false;
 static OcrProfile gForcedProfile = OcrProfile::Balanced;
 // Per-thread coarse-det switch for the TOC discovery pass (see DetParamsFor).
@@ -826,11 +828,16 @@ static bool ResolveProfileLocked(OcrProfile requested, OcrProfileState* st, cons
     return true;
 }
 
-static bool InitRuntimeLocked() {
-    if (gRuntimeTried) {
-        return gRuntimeOk;
+// Loads onnxruntime.dll and creates the shared env. Does not require OCR models,
+// so face-landmark sessions can use the same runtime.
+static bool EnsureOrtRuntimeLocked() {
+    if (gOrtReady) {
+        return true;
     }
-    gRuntimeTried = true;
+    if (gOrtTried) {
+        return false;
+    }
+    gOrtTried = true;
     TempStr dir = OcrSidecarDirTemp();
     SetMissingHint(dir);
 
@@ -838,10 +845,6 @@ static bool InitRuntimeLocked() {
     if (!file::Exists(dllPath)) {
         logf("OcrOnnx: missing %s\n", dllPath);
         return InitFail("missing dll");
-    }
-    if (!AnyOcrPairPresent(dir)) {
-        logf("OcrOnnx: no usable det/rec/dict pair in %s\n", dir);
-        return InitFail("missing det/rec/keys");
     }
 
     gOrtMod = LoadLibraryExW(ToWStrTemp(dllPath), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -921,9 +924,51 @@ static bool InitRuntimeLocked() {
         OrtFail(st, "GetAllocatorWithDefaultOptions");
         return InitFail("GetAllocatorWithDefaultOptions");
     }
-    gRuntimeOk = true;
+    gOrtReady = true;
     logf("OcrOnnx: ORT %s CPUExecutionProvider (API %d)\n", gOrtVersion ? gOrtVersion : "unknown", ORT_API_VERSION);
     return true;
+}
+
+static bool InitRuntimeLocked() {
+    if (gRuntimeTried) {
+        return gRuntimeOk;
+    }
+    gRuntimeTried = true;
+    if (!EnsureOrtRuntimeLocked()) {
+        return false;
+    }
+    TempStr dir = OcrSidecarDirTemp();
+    if (!AnyOcrPairPresent(dir)) {
+        logf("OcrOnnx: no usable det/rec/dict pair in %s\n", dir);
+        return InitFail("missing det/rec/keys");
+    }
+    gRuntimeOk = true;
+    return true;
+}
+
+bool OrtRuntimeAcquire(const OrtApi** api, OrtEnv** env, OrtSessionOptions** opts, OrtMemoryInfo** mem,
+                       OrtAllocator** alloc) {
+    gOcrLock.Lock();
+    bool ok = EnsureOrtRuntimeLocked();
+    if (ok) {
+        if (api) {
+            *api = gApi;
+        }
+        if (env) {
+            *env = gEnv;
+        }
+        if (opts) {
+            *opts = gOpts;
+        }
+        if (mem) {
+            *mem = gMem;
+        }
+        if (alloc) {
+            *alloc = gAlloc;
+        }
+    }
+    gOcrLock.Unlock();
+    return ok;
 }
 
 static bool LoadProfileLocked(OcrProfileState* st) {

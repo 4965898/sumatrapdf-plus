@@ -25772,6 +25772,18 @@ tw:文件色彩模式：匹配主題（依目前主題著色）
 uk:Колірний режим документа: Як у темі (кольори поточної теми)
 uz:Hujjat rang rejimi: Mavzuga mos (joriy mavzu ranglari)
 vn:Chế độ màu tài liệu: Theo giao diện (theo màu giao diện hiện tại)
+:Images: Automatic
+cn:图片：自动
+tw:圖片：自動
+:Images: Keep Original Colors
+cn:图片：保持原色
+tw:圖片：保持原色
+:Images: Simple Invert
+cn:图片：简单反色
+tw:圖片：簡單反色
+:Images: Smart Invert
+cn:图片：智能反色
+tw:圖片：智能反色
 :Document Color Mode: Original (document colors unchanged)
 af:Dokumentkleurmodus: Origineel (dokumentkleure onveranderd)
 am:Փաստաթղթի գունային ռեժիմ՝ բնօրինակ (փաստաթղթի գույներն անփոփոխ)
@@ -33322,6 +33334,33 @@ tw:AI 擷取目錄書籤
 :Rotate PDF Pages...
 cn:旋转 PDF 页面...
 tw:旋轉 PDF 頁面...
+:Manually Adjust Pages...
+cn:手动调整页面...
+tw:手動調整頁面...
+:Manually Adjust Pages
+cn:手动调整页面
+tw:手動調整頁面
+:Any Angle
+cn:任意角度
+tw:任意角度
+:Flip Horizontal
+cn:水平翻转
+tw:水平翻轉
+:Flip Vertical
+cn:垂直翻转
+tw:垂直翻轉
+:Auto Crop
+cn:自动裁切
+tw:自動裁切
+:Nothing to change.
+cn:没有需要改的地方。
+tw:沒有需要改的地方。
+:Failed to save the adjusted pages.
+cn:保存调整后的页面失败。
+tw:儲存調整後的頁面失敗。
+:Adjusted %d page(s) and saved to '%s'
+cn:已调整 %d 页并保存到 '%s'
+tw:已調整 %d 頁並儲存到 '%s'
 :Rotate PDF Pages
 cn:旋转 PDF 页面
 tw:旋轉 PDF 頁面
@@ -33857,3 +33896,11 @@ tw:正在傾斜校正… %d / %d
 :Deskew is already running.
 cn:倾斜校正已在进行。
 tw:傾斜校正已在進行。
+
+:Online multilingual voice settings
+cn:在线多语言语音设置
+tw:線上多語言語音設定
+
+:Online multilingual voice settings...
+cn:在线多语言语音设置...
+tw:線上多語言語音設定...

@@ -1131,7 +1131,8 @@ static void ShowSettingsPage(HWND hDlg, int page) {
         for (int j = 0; j < pages[i].count; j++) {
             int id = pages[i].ids[j];
             bool isInverseSearch = id == IDC_SECTION_INVERSESEARCH || id == IDC_CMDLINE_LABEL || id == IDC_CMDLINE;
-            bool show = i == page && (!isInverseSearch || showInverseSearch);
+            // Global "OCR scanned pages" is retired. The switch is per document.
+            bool show = i == page && id != IDC_AUTO_OCR && (!isInverseSearch || showInverseSearch);
             ShowWindow(GetDlgItem(hDlg, id), show ? SW_SHOW : SW_HIDE);
         }
     }

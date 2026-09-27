@@ -66,6 +66,16 @@ static bool ApplyReadAloudVoiceFromSettings() {
         return false;
     }
 
+    if (str::Eq(voiceId, kTtsMultilingualVoiceId)) {
+        // One saved voice for every language. Never clear the pseudo id if
+        // that voice is missing; speaking will pick one when it can.
+        const char* multi = gGlobalPrefs->readAloudMultilingualVoice;
+        if (!str::IsEmpty(multi)) {
+            TtsSetVoiceById(multi);
+        }
+        return false;
+    }
+
     if (!TtsSetVoiceById(voiceId)) {
         logf("ApplyReadAloudVoiceFromSettings: voice '%s' not available, using system default\n", voiceId);
         str::ReplaceWithCopy(&gGlobalPrefs->readAloudVoiceId, nullptr);

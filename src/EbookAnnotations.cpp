@@ -1062,6 +1062,10 @@ static bool GetMupdfAnnotationPageRects(EbookAnnotations* annotations, EngineBas
     }
 
     Rect mediabox = engine->PageMediabox(pageNo).Round();
+    // Joined stext lines (a wrapped CJK paragraph) have no zero-width break.
+    // One box for the whole run makes underline, strikeout, and squiggly use
+    // the paragraph height: one thick stroke on the last line only.
+    bool geoSplit = !PageHasVerticalGlyphLayout(engine, pageNo);
     Rect* c = coords + fromGlyph;
     Rect* end = coords + toGlyph;
     while (c < end) {
@@ -1072,7 +1076,12 @@ static bool GetMupdfAnnotationPageRects(EbookAnnotations* annotations, EngineBas
             break;
         }
         Rect* lineStart = c;
+        Rect band = *c;
         while (c < end && (c->x || c->dx)) {
+            if (geoSplit && c != lineStart && GlyphJumpsToNextBandLine(band, *c)) {
+                break;
+            }
+            band = band.Union(*c);
             c++;
         }
         Rect rect = BuildHighlightLineRect(lineStart, c).Intersect(mediabox);

@@ -290,7 +290,10 @@ enum {
     CmdToggleOcrDeskew = 479,
     CmdDisplayFilter = 480,
     CmdPdfTocApplyOffsetBelow = 481,
-    CmdNone = 482,
+    CmdSetDocumentImageDarkAuto = 482,
+    CmdSetDocumentImageDarkOriginal = 483,
+    CmdSetDocumentImageDarkTone = 484,
+    CmdNone = 485,
 
     /* range for file history */
     CmdFileHistoryFirst,

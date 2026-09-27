@@ -165,10 +165,88 @@ static void PortraitOnWhiteKeepsTheFace() {
     utassert(hair[0] == 28 && hair[1] == 22 && hair[2] == 20);
 }
 
+static void LineArtKnocksPaperInsideAStroke() {
+    constexpr int w = 24;
+    constexpr int h = 24;
+    constexpr int comps = 3;
+    u8 samples[w * h * comps];
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            PutPx(samples, comps, w * comps, x, y, 255, 255, 255);
+        }
+    }
+    for (int x = 4; x <= 19; x++) {
+        PutPx(samples, comps, w * comps, x, 4, 0, 0, 0);
+        PutPx(samples, comps, w * comps, x, 19, 0, 0, 0);
+    }
+    for (int y = 5; y <= 18; y++) {
+        PutPx(samples, comps, w * comps, 4, y, 0, 0, 0);
+        PutPx(samples, comps, w * comps, 19, y, 0, 0, 0);
+    }
+    EbookPaperColors colors = TestColors();
+    utassert(EbookKnockoutPaperBackground(samples, w, h, comps, w * comps, colors));
+    u8* inside = Px(samples, comps, w * comps, 10, 10);
+    utassert(inside[0] == colors.bgR && inside[1] == colors.bgG && inside[2] == colors.bgB);
+    u8* stroke = Px(samples, comps, w * comps, 4, 10);
+    utassert(Near(stroke[0], colors.textR) && Near(stroke[1], colors.textG) && Near(stroke[2], colors.textB));
+}
+
+static void FloodLeavesWhiteInsideTheSubject() {
+    constexpr int w = 40;
+    constexpr int h = 40;
+    constexpr int comps = 3;
+    u8 samples[w * h * comps];
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            PutPx(samples, comps, w * comps, x, y, 255, 255, 255);
+        }
+    }
+    for (int y = 8; y <= 31; y++) {
+        for (int x = 8; x <= 31; x++) {
+            bool hole = x >= 16 && x <= 23 && y >= 16 && y <= 23;
+            if (!hole) {
+                // Mid-tone fur, not a black stroke, so this is a photograph.
+                PutPx(samples, comps, w * comps, x, y, 170, 130, 100);
+            }
+        }
+    }
+    EbookPaperColors colors = TestColors();
+    utassert(EbookKnockoutPaperBackground(samples, w, h, comps, w * comps, colors));
+    u8* outside = Px(samples, comps, w * comps, 1, 1);
+    utassert(outside[0] == colors.bgR && outside[1] == colors.bgG && outside[2] == colors.bgB);
+    u8* chest = Px(samples, comps, w * comps, 20, 20);
+    utassert(chest[0] == 255 && chest[1] == 255 && chest[2] == 255);
+    u8* fur = Px(samples, comps, w * comps, 10, 10);
+    utassert(fur[0] == 170 && fur[1] == 130 && fur[2] == 100);
+}
+
+static void GrayPhotographIsLeftAlone() {
+    constexpr int w = 30;
+    constexpr int h = 30;
+    constexpr int comps = 3;
+    u8 samples[w * h * comps];
+    u8 original[w * h * comps];
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            if (y < 10) {
+                PutPx(samples, comps, w * comps, x, y, 235, 235, 235);
+            } else {
+                PutPx(samples, comps, w * comps, x, y, 140, 140, 140);
+            }
+        }
+    }
+    memcpy(original, samples, sizeof(samples));
+    utassert(!EbookKnockoutPaperBackground(samples, w, h, comps, w * comps, TestColors()));
+    utassert(memcmp(samples, original, sizeof(samples)) == 0);
+}
+
 void EbookImagePaper_UnitTests() {
     LineArtKeepsColorAndDropsPaper();
+    LineArtKnocksPaperInsideAStroke();
     CreamPaperIsKnockedOut();
     PhotographIsLeftAlone();
     TransparentPixelStaysTransparent();
     PortraitOnWhiteKeepsTheFace();
+    FloodLeavesWhiteInsideTheSubject();
+    GrayPhotographIsLeftAlone();
 }

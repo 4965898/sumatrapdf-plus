@@ -535,10 +535,22 @@ CommandVisibility GetCommandVisibility(int cmdId, const AppCommandCtx& ctx, Comm
         return CommandVisibility::Hide;
     }
 
+    if (cmdId == CmdPdfRotatePages) {
+        EngineBase* engine = ctx.tab ? ctx.tab->GetEngine() : nullptr;
+        CommandVisibility v =
+            EngineMupdfCanAdjustPageView(engine) ? CommandVisibility::Show : CommandVisibility::Disable;
+        return MapForSurface(v, surface);
+    }
+    if (cmdId == CmdDeskewPage || cmdId == CmdDeskewAllScannedPages) {
+        EngineBase* engine = ctx.tab ? ctx.tab->GetEngine() : nullptr;
+        CommandVisibility v =
+            EngineMupdfCanAdjustPageView(engine) ? CommandVisibility::Show : CommandVisibility::Disable;
+        return MapForSurface(v, surface);
+    }
     if (!ctx.isPdf) {
         if (cmdId == CmdPdShowInfo || cmdId == CmdPdfBake || cmdId == CmdPdfCompress || cmdId == CmdPdfDecompress ||
             cmdId == CmdPdfEncrypt || cmdId == CmdPdfDecrypt || cmdId == CmdPdfDeletePages ||
-            cmdId == CmdPdfExtractPages || cmdId == CmdPdfRotatePages) {
+            cmdId == CmdPdfExtractPages) {
             return CommandVisibility::Hide;
         }
     }
