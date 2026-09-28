@@ -1,4 +1,6 @@
 /* Copyright 2026 the SumatraPDF project authors (see AUTHORS file).
+   Portions adapted from autoContents, Copyright (c) 2026 Shi Jian,
+   incorporated with permission from the copyright holder.
    License: GPLv3 */
 
 // AI printed-TOC recognition via an OpenAI-compatible vision API.

@@ -78,6 +78,15 @@ RectF MergeHighlightLineRect(RectF a, RectF b) {
     return RectF(x0, centerY - bandDy * 0.5f, x1 - x0, bandDy);
 }
 
+bool GlyphJumpsToNextBandLine(const Rect& band, const Rect& c) {
+    if (band.dy <= 0 || c.dy <= 0) {
+        return false;
+    }
+    int yOverlap = std::min(band.y + band.dy, c.y + c.dy) - std::max(band.y, c.y);
+    int minDy = std::min(band.dy, c.dy);
+    return yOverlap * 10 < minDy * 3;
+}
+
 Rect BuildHighlightLineRect(Rect* c0, Rect* cEnd) {
     int x0 = INT_MAX;
     int x1 = INT_MIN;

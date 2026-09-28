@@ -450,6 +450,26 @@ const char* scrollMsgStr(USHORT msg) {
     return str::FormatTemp("%d", (int)msg);
 }
 
+// A scroll that cannot move (the page already fits, or the view is at the
+// edge) still has to turn the page. The mouse wheel does this itself.
+// Two-finger swipe and trackpoint-with-middle-button only scroll.
+static void TurnPageAtScrollEdge(MainWindow* win, bool goPrev) {
+    DWORD now = GetTickCount();
+    if (now - win->edgePageTurnTick < 350) {
+        return;
+    }
+    DisplayModel* dm = win->AsFixed();
+    if (!dm) {
+        return;
+    }
+    bool turned = goPrev ? dm->GoToPrevPage(true) : dm->GoToNextPage();
+    if (!turned) {
+        return;
+    }
+    win->edgePageTurnTick = now;
+    ReadAloudOnUserViewChanged(win);
+}
+
 static void OnVScroll(MainWindow* win, WPARAM wp) {
     ReportIf(!win->AsFixed());
 
@@ -577,6 +597,10 @@ static void OnVScroll(MainWindow* win, WPARAM wp) {
             win->AsFixed()->ScrollYTo(si.nPos);
             ReadAloudOnUserViewChanged(win);
         }
+    } else if (msg == SB_LINEUP || msg == SB_PAGEUP || msg == SB_HALF_PAGEUP || msg == SB_TOP) {
+        TurnPageAtScrollEdge(win, true);
+    } else if (msg == SB_LINEDOWN || msg == SB_PAGEDOWN || msg == SB_HALF_PAGEDOWN || msg == SB_BOTTOM) {
+        TurnPageAtScrollEdge(win, false);
     }
 }
 
@@ -3065,6 +3089,35 @@ static void ZoomByMouseWheel(MainWindow* win, WPARAM wp) {
     SetTimer(win->hwndCanvas, kWheelZoomTimerID, kWheelZoomDebounceMs, nullptr);
 }
 
+// True when the current page already fits in the window. A few pixels of
+// rounding still count: continuous fit-page leaves the page that tall.
+static bool WheelPageFitsView(DisplayModel* dm) {
+    if (!dm) {
+        return false;
+    }
+    int pageNo = dm->CurrentPageNo();
+    if (!dm->ValidPageNo(pageNo)) {
+        return false;
+    }
+    PageInfo* pi = dm->GetPageInfo(pageNo);
+    int viewDy = dm->GetViewPort().dy;
+    if (!pi || viewDy <= 0) {
+        return false;
+    }
+    return pi->pos.dy <= viewDy + 8;
+}
+
+static void WheelFlipPage(MainWindow* win, short delta) {
+    win->wheelAccumDelta += delta;
+    if (win->wheelAccumDelta >= WHEEL_DELTA) {
+        win->ctrl->GoToPrevPage(true);
+        win->wheelAccumDelta -= WHEEL_DELTA;
+    } else if (win->wheelAccumDelta <= -WHEEL_DELTA) {
+        win->ctrl->GoToNextPage();
+        win->wheelAccumDelta += WHEEL_DELTA;
+    }
+}
+
 static LRESULT CanvasOnMouseWheel(MainWindow* win, UINT msg, WPARAM wp, LPARAM lp) {
     // Scroll the ToC sidebar, if it's visible and the cursor is in it
     if (win->tocVisible && IsCursorOverWindow(win->tocTreeView->hwnd) && !gWheelMsgRedirect) {
@@ -3108,14 +3161,16 @@ static LRESULT CanvasOnMouseWheel(MainWindow* win, UINT msg, WPARAM wp, LPARAM l
 
     // fit content: always flip page on wheel, regardless of scrollbar state
     if (vScroll && dm && dm->GetZoomVirtual() == kZoomFitContent && IsSingle(dm->GetDisplayMode())) {
-        win->wheelAccumDelta += delta;
-        if (win->wheelAccumDelta >= WHEEL_DELTA) {
-            win->ctrl->GoToPrevPage();
-            win->wheelAccumDelta -= WHEEL_DELTA;
-        } else if (win->wheelAccumDelta <= -WHEEL_DELTA) {
-            win->ctrl->GoToNextPage();
-            win->wheelAccumDelta += WHEEL_DELTA;
-        }
+        WheelFlipPage(win, delta);
+        return 0;
+    }
+
+    // The whole page is already on screen, but neither layout preset is
+    // active (not fit-width continuous, not fit-page single). One notch
+    // turns the page. A 16px line scroll never gets there, and the page
+    // scrollbar's nPage is 1 so a pixel delta rounds to zero.
+    if (vScroll && WheelPageFitsView(dm)) {
+        WheelFlipPage(win, delta);
         return 0;
     }
 
@@ -3185,13 +3240,10 @@ static LRESULT CanvasOnMouseWheel(MainWindow* win, UINT msg, WPARAM wp, LPARAM l
     if (isSinglePageMode && vScroll && dm) {
         if (dm->NeedVScroll()) {
             // Use continuous scrolling that handles page transitions at boundaries
-            SCROLLINFO si{};
-            si.cbSize = sizeof(si);
-            si.fMask = SIF_PAGE;
-            GetScrollInfo(win->hwndCanvas, hScroll ? SB_HORZ : SB_VERT, &si);
-            // Keep zoomed single-page scrolling controlled: one wheel notch moves
-            // one third of the viewport instead of jumping many screens.
-            int scrollBy = -MulDiv(si.nPage, delta, WHEEL_DELTA * 3);
+            // The page scrollbar stores nPage as 1 (one page), not pixels.
+            // MulDiv against that rounds every notch to 0, so the wheel did nothing.
+            int viewDy = dm->GetViewPort().dy;
+            int scrollBy = -MulDiv(viewDy > 0 ? viewDy : 1, delta, WHEEL_DELTA * 3);
             // on sensitive touchpads delta can be very small
             if (scrollBy == 0) return 0;
             if (hScroll) {
@@ -3442,7 +3494,13 @@ static LRESULT OnGesture(MainWindow* win, UINT msg, WPARAM wp, LPARAM lp) {
                     // pan / scroll
                     bool canScrollRightBefore = dm->CanScrollRight();
                     bool canScrollLeftBefore = dm->CanScrollLeft();
+                    DWORD tickBefore = win->edgePageTurnTick;
                     win->MoveDocBy(deltaX, deltaY);
+                    // MoveDocBy turns the page when a vertical pan cannot
+                    // scroll. Stop inertia so the new page is not dragged too.
+                    if (deltaY != 0 && win->edgePageTurnTick != tickBefore) {
+                        touchState.panStarted = false;
+                    }
 
                     // if pan to the rigth edge, we want to "sticK" to it
                     // and only flip page on the next flick motion

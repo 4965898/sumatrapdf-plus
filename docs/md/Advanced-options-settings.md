@@ -163,16 +163,16 @@ ExtractPdfTocMode = standard
 AiChatProvider = doubao
 
 ; AI table of contents API base URL
-AiTocApiBaseUrl =
+AiTocApiBaseUrl = 
 
 ; AI table of contents API key
-AiTocApiKey =
+AiTocApiKey = 
 
 ; AI table of contents model
-AiTocApiModel =
+AiTocApiModel = 
 
 ; saved AI table of contents API profiles (JSON)
-AiTocApiProfiles =
+AiTocApiProfiles = 
 
 ; maximum simultaneous AI table of contents requests (1-8)
 AiTocApiConcurrency = 4
@@ -246,6 +246,12 @@ LastLightTheme = Light-Warm
 ; Valid values: original, theme. Legacy aliases smart, auto, black, light are
 ; still accepted on load. (introduced in version 3.7)
 DocumentColorMode = theme
+
+; Valid values: auto (classify each image), original (draw image pixels
+; unchanged), simple (map white paper to the theme background and black ink to
+; the theme text), tone (shift image colors toward the theme). Ignored for
+; Original document color mode and for light themes. (introduced in version 3.7)
+DocumentImageDarkStrategy = auto
 
 ; if both favorites and bookmarks parts of sidebar are visible, this is the
 ; height of bookmarks (table of contents) part
@@ -638,6 +644,10 @@ ReadAloudSmartOnlineVoiceZh =
 ; or unset means auto-pick best online English voice (introduced in version 3.7)
 ReadAloudSmartOnlineVoiceEn =
 
+; voice id used by online multilingual Read Aloud; empty or unset means
+; auto-pick the first multilingual voice (introduced in version 3.7)
+ReadAloudMultilingualVoice =
+
 ; a whitespace separated list of passwords to try when opening a password
 ; protected document (passwords containing spaces must be quoted) (introduced in
 ; version 2.4)
@@ -756,6 +766,10 @@ FileStates [
     ; Mild/Strong; 1/2/3 migrate to auto) (introduced in version 3.8)
     DisplayFilterMode = 0
 
+    ; whether automatic OCR is enabled for this document after a manual toggle
+    ; (introduced in version 3.8)
+    AutoOcrOn = false
+
     ; data required to restore the last read page in the ebook UI
     ReparseIdx = 0
 
@@ -840,3 +854,4 @@ The components are hex values (ranging from 00 to FF) and stand for:
 - `bb` : blue component
 
 For example #ff0000 means red color. #7fff0000 is half-transparent red.
+

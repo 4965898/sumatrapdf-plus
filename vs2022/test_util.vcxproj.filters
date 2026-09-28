@@ -120,6 +120,7 @@
     <ClCompile Include="..\src\Flags.cpp" />
     <ClCompile Include="..\src\PdfDarkModeImageRules.cpp" />
     <ClCompile Include="..\src\PdfDarkModeOklab.cpp" />
+    <ClCompile Include="..\src\FaceLandmarkEngineNoOp.cpp" />
     <ClCompile Include="..\src\SumatraConfig.cpp" />
     <ClCompile Include="..\src\SumatraUnitTests.cpp" />
     <ClCompile Include="..\src\common\arena.cpp">

@@ -1553,6 +1553,20 @@ static bool LookupEnsureChineseTtsVoice() {
                 logf("Lookup TTS Chinese voice: active online smart preference\n");
                 return true;
             }
+        } else if (str::Eq(selected, kTtsMultilingualVoiceId)) {
+            Vec<TtsVoiceInfo> voices = TtsGetVoices();
+            bool ok = false;
+            for (TtsVoiceInfo& v : voices) {
+                if (str::Eq(v.id, gGlobalPrefs->readAloudMultilingualVoice) && LookupTtsVoiceLangIsZh(v)) {
+                    ok = tryId(v.id);
+                    break;
+                }
+            }
+            TtsFreeVoices(voices);
+            if (ok) {
+                logf("Lookup TTS Chinese voice: active multilingual preference\n");
+                return true;
+            }
         } else if (!str::IsEmpty(selected)) {
             // A single selected voice is shared by lookup and read-aloud only
             // when it is actually Chinese; never force a configured English
@@ -1600,9 +1614,24 @@ static bool LookupEnsureEnglishTtsVoice() {
         if (tryId(gGlobalPrefs->readAloudSmartOnlineVoiceEn)) {
             return true;
         }
+        if (str::Eq(gGlobalPrefs->readAloudVoiceId, kTtsMultilingualVoiceId)) {
+            Vec<TtsVoiceInfo> voices = TtsGetVoices();
+            bool ok = false;
+            for (TtsVoiceInfo& v : voices) {
+                if (str::Eq(v.id, gGlobalPrefs->readAloudMultilingualVoice) && LookupTtsVoiceLangIsEn(v)) {
+                    ok = tryId(v.id);
+                    break;
+                }
+            }
+            TtsFreeVoices(voices);
+            if (ok) {
+                return true;
+            }
+        }
         if (!str::IsEmpty(gGlobalPrefs->readAloudVoiceId) &&
             !str::Eq(gGlobalPrefs->readAloudVoiceId, kTtsSmartBilingualVoiceId) &&
-            !str::Eq(gGlobalPrefs->readAloudVoiceId, kTtsSmartOnlineBilingualVoiceId)) {
+            !str::Eq(gGlobalPrefs->readAloudVoiceId, kTtsSmartOnlineBilingualVoiceId) &&
+            !str::Eq(gGlobalPrefs->readAloudVoiceId, kTtsMultilingualVoiceId)) {
             Vec<TtsVoiceInfo> voices = TtsGetVoices();
             bool ok = false;
             for (TtsVoiceInfo& v : voices) {

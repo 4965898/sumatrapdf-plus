@@ -40,6 +40,13 @@ static DarkModePalette BuildPaletteFromColors(COLORREF textCol, COLORREF bgCol, 
     return p;
 }
 
+DarkModePalette PdfDarkModeThemePalette() {
+    COLORREF bgCol = 0;
+    COLORREF textCol = ThemePageRenderColors(bgCol, true);
+    COLORREF linkCol = ThemeUsesDarkChrome() ? ThemeWindowLinkColor() : 0;
+    return BuildPaletteFromColors(textCol, bgCol, linkCol);
+}
+
 bool DarkModeProfileUsesObjectLevel(const DarkModeProfile* profile) {
     return profile && (profile->mode == PageColorMode::SmartDark || profile->mode == PageColorMode::FollowThemeDirect ||
                        profile->mode == PageColorMode::FollowThemeV2);
@@ -84,12 +91,13 @@ u32 PdfDarkModeComputeProfileHash(const DarkModeProfile* profile) {
     h = mix(h, *(u32*)&profile->options.lightFillChromaThreshold);
     h = mix(h, *(u32*)&profile->options.lightFillLuminanceThreshold);
     h = mix(h, (u32)GetPdfDocumentColorMode());
+    h = mix(h, (u32)GetPdfImageDarkStrategy());
     h = mix(h, ThemeUsesDarkChrome() ? 1 : 0);
     h = mix(h, ThemeUsesOriginalPageColors() ? 1 : 0);
     h = mix(h, ThemeUsesEyeCareChrome() ? 1 : 0);
     // Bump when FollowThemeV2 page-image algorithm changes (invalidates tile/image caches).
     if (profile->mode == PageColorMode::FollowThemeV2) {
-        h = mix(h, 32u); // 32 = grayscale photos are not soft-shadow plates
+        h = mix(h, 72u); // face paste: oval+nose silhouette convex hull (scale 1.08)
     }
     return h;
 }

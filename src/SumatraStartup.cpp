@@ -42,6 +42,7 @@
 #include "TextSearch.h"
 #include "Notifications.h"
 #include "SumatraPDF.h"
+#include "FaceLandmarkEngine.h"
 #include "Toolbar.h"
 #include "MainWindow.h"
 #include "WindowTab.h"
@@ -1447,6 +1448,9 @@ int APIENTRY WinMain(_In_ HINSTANCE /*hInstance*/, _In_opt_ HINSTANCE, _In_ LPST
     // ensure that C functions behave consistently under all OS locales
     // (use Win32 functions where localized input or output is desired)
     setlocale(LC_ALL, "C");
+    if (FaceLandmarkDebugTryHandleCommandLine()) {
+        return 0;
+    }
     // don't show system-provided dialog boxes when accessing files on drives
     // that are not mounted (e.g. a: drive without floppy or cd rom drive
     // without a cd).

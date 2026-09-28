@@ -672,8 +672,10 @@ bool PdfDarkModeShouldPreserveImageFeatures(const DarkImageFeatures& f, float pa
 
 void PdfDarkModeCompressPhotoHighlights(float r, float g, float b, float* outR, float* outG, float* outB) {
     float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
-    const float knee = 0.82f;
-    const float cap = 0.90f;
+    // White paper stays lighter than the subject, but not a lamp on a dark page.
+    // Slope stays positive, so highlights are not inverted.
+    const float knee = 0.55f;
+    const float whiteOut = 0.62f;
     if (lum <= knee) {
         *outR = r;
         *outG = g;
@@ -684,7 +686,7 @@ void PdfDarkModeCompressPhotoHighlights(float r, float g, float b, float* outR, 
     if (t > 1.f) {
         t = 1.f;
     }
-    float targetLum = knee + (cap - knee) * t;
+    float targetLum = knee + (whiteOut - knee) * t;
     float scale = lum > 0.0001f ? targetLum / lum : 1.f;
     *outR = r * scale;
     *outG = g * scale;

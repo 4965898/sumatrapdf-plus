@@ -87,7 +87,7 @@ struct WindowTab {
     bool didScrollToSelectedAnnotation = false; // only automatically scroll once
 
     bool hideAnnotations = false;
-    // Auto OCR for this tab. Set on load: on only for image-only scanned PDFs.
+    // Auto OCR for this tab. Manual only; restored from this document's FileState.
     bool autoOcrOn = false;
     EbookAnnotations* ebookAnnotations = nullptr;
 

@@ -169,6 +169,16 @@ inline bool PdfDarkModeV2PhotoHaloKeepDarkPixel(float lum, bool nearMat) {
     return false;
 }
 
+// Edge-to-edge photograph, including a mostly gray one with a few saturated
+// subjects (RAZ "These geese"). Okular on those saturated pixels paints false
+// color. White-margin pages stay on the paper path so the margin can go dark.
+inline bool PdfDarkModeV2ShouldKeepOriginalPhotograph(float paperRatio, float lumVar) {
+    if (lumVar < 0.018f || paperRatio >= 0.35f) {
+        return false;
+    }
+    return true;
+}
+
 // A colorful, continuous-tone image whose outer band is not paper is already a
 // full-bleed photograph. Running photo-rect extraction on it mistakes bright sky
 // or walls for page paper and produces cut-out halos. White-margin RAZ/photo-book
@@ -213,6 +223,8 @@ inline bool PdfDarkModeV2LooksLikeSoftMaskPaintChip(int colorW, int colorH, int 
 inline bool PdfDarkModeV2IsMrcBackgroundGhostPixel(float lum, float chroma) {
     return lum > 0.55f && chroma < 0.32f;
 }
+
+void PdfDarkModeV2FlushPerfLog();
 
 fz_device* PdfDarkModeWrapV2Device(fz_context* ctx, fz_device* inner, const DarkModePalette* palette,
                                    const RectF& pageBounds, DarkModeEngineCache* engineCache = nullptr,

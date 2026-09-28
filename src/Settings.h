@@ -388,6 +388,9 @@ struct FileState {
     // page display enhancement mode for this document (0=off, 4=auto
     // Mild/Strong; 1/2/3 migrate to auto)
     int displayFilterMode;
+    // whether automatic OCR is enabled for this document after a manual
+    // toggle
+    bool autoOcrOn;
     // index into an ebook's HTML data from which reparsing has to happen
     // in order to restore the last viewed page (i.e. the equivalent of
     // PageNo for the ebook UI)
@@ -614,6 +617,9 @@ struct GlobalPrefs {
     // DjVu, Markdown, etc.): original (publisher colors unchanged) or
     // theme (match current UI theme)
     char* documentColorMode;
+    // how images are treated when a dark theme is on and document color
+    // mode is Match theme
+    char* documentImageDarkStrategy;
     // if both favorites and bookmarks parts of sidebar are visible, this
     // is the height of bookmarks (table of contents) part
     int tocDy;
@@ -708,6 +714,9 @@ struct GlobalPrefs {
     // voice id of the English voice used by online smart bilingual Read
     // Aloud; empty or unset means auto-pick best online English voice
     char* readAloudSmartOnlineVoiceEn;
+    // voice id used by online multilingual Read Aloud; empty or unset
+    // means auto-pick the first multilingual voice
+    char* readAloudMultilingualVoice;
     // passwords to try when opening a password protected document
     Vec<char*>* defaultPasswords;
     // ISO code of the current UI language
@@ -987,14 +996,15 @@ static const FieldInfo gFileStateFields[] = {
     {offsetof(FileState, displayFilterSharpness), SettingType::Int, 0, "该文档页面锐度（0..100，0=预设基线）"},
     {offsetof(FileState, displayFilterMode), SettingType::Int, 0,
      "该文档显示增强模式（0=关闭，1=旧版，2=阅读，3=扫描件）"},
+    {offsetof(FileState, autoOcrOn), SettingType::Bool, false, nullptr},
     {offsetof(FileState, reparseIdx), SettingType::Int, 0, nullptr},
     {offsetof(FileState, tocState), SettingType::IntArray, 0, nullptr},
 };
 static StructInfo gFileStateInfo = {
-    sizeof(FileState), 25, gFileStateFields,
+    sizeof(FileState), 26, gFileStateFields,
     "FilePath\0Favorites\0IsPinned\0IsMissing\0OpenCount\0DecryptionKey\0UseDefaultState\0DisplayMode\0ScrollPos\0PageN"
     "o\0Zoom\0Rotation\0WindowState\0WindowPos\0ShowToc\0SidebarDx\0DisplayR2L\0BgCol\0TabCol\0DisplayFilterBrightness"
-    "\0DisplayFilterContrast\0DisplayFilterSharpness\0DisplayFilterMode\0ReparseIdx\0TocState"};
+    "\0DisplayFilterContrast\0DisplayFilterSharpness\0DisplayFilterMode\0AutoOcrOn\0ReparseIdx\0TocState"};
 
 static const FieldInfo gPointF_1_Fields[] = {
     {offsetof(PointF, x), SettingType::Float, (intptr_t)"0", nullptr},
@@ -1053,8 +1063,8 @@ static const StructInfo gPointInfo = {sizeof(Point), 2, gPointFields, "X\0Y"};
 
 static const FieldInfo gGlobalPrefsFields[] = {
     {(size_t)-1, SettingType::Comment,
-     (intptr_t)"For documentation, see https://www.sumatrapdfreader.org/settings/settings3-7-32.html",
-     "For documentation, see https://www.sumatrapdfreader.org/settings/settings3-7-32.html"},
+     (intptr_t)"For documentation, see https://www.sumatrapdfreader.org/settings/settings3-7-33.html",
+     "For documentation, see https://www.sumatrapdfreader.org/settings/settings3-7-33.html"},
     {(size_t)-1, SettingType::Comment, 0, nullptr},
     {offsetof(GlobalPrefs, checkForUpdates), SettingType::Bool, true, "是否每天自动检测新版本"},
     {offsetof(GlobalPrefs, customScreenDPI), SettingType::Int, 0, "自定义主屏幕 DPI；0=跟随系统"},
@@ -1124,6 +1134,7 @@ static const FieldInfo gGlobalPrefsFields[] = {
     {offsetof(GlobalPrefs, lastLightTheme), SettingType::String, (intptr_t)"Light-Warm", "切换到浅色模式时的主题"},
     {offsetof(GlobalPrefs, documentColorMode), SettingType::String, (intptr_t)"theme",
      "文档颜色模式 original/theme（原稿/匹配主题）"},
+    {offsetof(GlobalPrefs, documentImageDarkStrategy), SettingType::String, (intptr_t)"auto", nullptr},
     {offsetof(GlobalPrefs, tocDy), SettingType::Int, 0, "目录区高度（与收藏同显时）"},
     {offsetof(GlobalPrefs, toolbarSize), SettingType::Int, 18, "工具栏高度"},
     {offsetof(GlobalPrefs, treeFontName), SettingType::String, (intptr_t)"automatic", "目录/收藏树字体"},
@@ -1177,6 +1188,7 @@ static const FieldInfo gGlobalPrefsFields[] = {
     {offsetof(GlobalPrefs, readAloudSmartVoiceEn), SettingType::String, 0, "本地智能英文语音"},
     {offsetof(GlobalPrefs, readAloudSmartOnlineVoiceZh), SettingType::String, 0, "在线智能中文语音"},
     {offsetof(GlobalPrefs, readAloudSmartOnlineVoiceEn), SettingType::String, 0, "在线智能英文语音"},
+    {offsetof(GlobalPrefs, readAloudMultilingualVoice), SettingType::String, 0, "在线多语言语音"},
     {(size_t)-1, SettingType::Comment, 0, nullptr},
     {(size_t)-1, SettingType::Comment, (intptr_t)"You're not expected to change those manually",
      "You're not expected to change those manually"},
@@ -1199,7 +1211,7 @@ static const FieldInfo gGlobalPrefsFields[] = {
      "Settings below are not recognized by the current version"},
 };
 static const StructInfo gGlobalPrefsInfo = {
-    sizeof(GlobalPrefs), 128, gGlobalPrefsFields,
+    sizeof(GlobalPrefs), 130, gGlobalPrefsFields,
     "\0\0CheckForUpdates\0CustomScreenDPI\0DefaultDisplayMode\0DefaultZoom\0EnableTeXEnhancements\0EscToExit\0FullPathI"
     "nTitle\0InverseSearchCmdLine\0LazyLoading\0MainWindowBackground\0NoHomeTab\0HomePageSortByFrequentlyRead\0HomePage"
     "ViewMode\0HomePageThumbnailDx\0ReloadModifiedDocuments\0RememberOpenedFiles\0RememberStatePerDocument\0RestoreSess"
@@ -1209,13 +1221,14 @@ static const StructInfo gGlobalPrefsInfo = {
     "\0AiTocApiProfiles\0AiTocApiConcurrency\0AiChatUseDeepSeekInsteadOfDoubao\0EnableAskAI\0ShowFavorites\0ShowToc\0Sh"
     "owLinks\0ShowStartPage\0SidebarDx\0Scrollbars\0ScrollbarInSinglePage\0SmoothScroll\0FastScrollOverScrollbar\0Preve"
     "ntSleepInFullscreen\0TabWidth\0TabFontSize\0TabBarHeight\0Theme\0LastDarkTheme\0LastLightTheme\0DocumentColorMode"
-    "\0TocDy\0ToolbarSize\0TreeFontName\0TreeFontSize\0TreeWrapLabels\0UIFontSize\0DisableAntiAlias\0EngineeringDrawing"
-    "Enhance\0UseSysColors\0UseTabs\0TabsMru\0ZoomLevels\0ZoomIncrement\0\0FixedPageUI\0\0EBookUI\0\0ComicBookUI\0\0Ima"
-    "geUI\0\0ChmUI\0\0Annotations\0\0ExternalViewers\0\0ForwardSearch\0\0PrinterDefaults\0\0Fullscreen\0\0SelectionHand"
-    "lers\0\0Shortcuts\0\0Themes\0\0TabGroups\0\0ReadAloudVoiceId\0ReadAloudSpeakingRate\0ReadAloudSpeakingRateZh\0Read"
-    "AloudSpeakingRateEn\0ReadAloudSmartVoiceZh\0ReadAloudSmartVoiceEn\0ReadAloudSmartOnlineVoiceZh\0ReadAloudSmartOnli"
-    "neVoiceEn\0\0\0DefaultPasswords\0UiLanguage\0VersionToSkip\0WindowState\0WindowPos\0SearchUIWindowPos\0FileStates"
-    "\0SessionData\0ReopenOnce\0TimeOfLastUpdateCheck\0TimeOfUpdateCheckSnooze\0OpenCountWeek\0PropWinPos\0\0"};
+    "\0DocumentImageDarkStrategy\0TocDy\0ToolbarSize\0TreeFontName\0TreeFontSize\0TreeWrapLabels\0UIFontSize\0DisableAn"
+    "tiAlias\0EngineeringDrawingEnhance\0UseSysColors\0UseTabs\0TabsMru\0ZoomLevels\0ZoomIncrement\0\0FixedPageUI\0\0EB"
+    "ookUI\0\0ComicBookUI\0\0ImageUI\0\0ChmUI\0\0Annotations\0\0ExternalViewers\0\0ForwardSearch\0\0PrinterDefaults\0\0"
+    "Fullscreen\0\0SelectionHandlers\0\0Shortcuts\0\0Themes\0\0TabGroups\0\0ReadAloudVoiceId\0ReadAloudSpeakingRate\0Re"
+    "adAloudSpeakingRateZh\0ReadAloudSpeakingRateEn\0ReadAloudSmartVoiceZh\0ReadAloudSmartVoiceEn\0ReadAloudSmartOnline"
+    "VoiceZh\0ReadAloudSmartOnlineVoiceEn\0ReadAloudMultilingualVoice\0\0\0DefaultPasswords\0UiLanguage\0VersionToSkip"
+    "\0WindowState\0WindowPos\0SearchUIWindowPos\0FileStates\0SessionData\0ReopenOnce\0TimeOfLastUpdateCheck\0TimeOfUpd"
+    "ateCheckSnooze\0OpenCountWeek\0PropWinPos\0\0"};
 static const FieldInfo gTheme_1_Fields[] = {
     {offsetof(Theme, name), SettingType::String, (intptr_t)"", "主题名称"},
     {offsetof(Theme, textColor), SettingType::Color, (intptr_t)"", "文字颜色"},

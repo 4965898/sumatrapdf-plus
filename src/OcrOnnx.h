@@ -72,3 +72,14 @@ bool OcrClassifyPageOrientationRgb(const u8* rgb, int w, int h, int stride, int*
 
 // How many pages we OCR at once (1–4). Same count as ONNX session slots.
 int OcrInferenceSlotCount();
+
+// Shared ONNX Runtime (same DLL, env, and session options as OCR).
+// Face landmarks use this instead of a second runtime. Safe to call when OCR
+// models are absent; OCR itself still requires its own model files.
+struct OrtEnv;
+struct OrtSessionOptions;
+struct OrtMemoryInfo;
+struct OrtAllocator;
+struct OrtApi;
+bool OrtRuntimeAcquire(const OrtApi** api, OrtEnv** env, OrtSessionOptions** opts, OrtMemoryInfo** mem,
+                       OrtAllocator** alloc);

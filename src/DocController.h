@@ -37,7 +37,10 @@ struct DocControllerCallback {
     // DisplayModel //
     virtual void Repaint() = 0;
     virtual void UpdateScrollbars(Size canvas) = 0;
-    virtual void RequestRendering(int pageNo) = 0;
+    // prioritize: this page is on screen. Stop a prefetch that already started
+    // so it does not keep the engine lock while the visible page waits.
+    virtual void RequestRendering(int pageNo, bool prioritize = false) = 0;
+    virtual bool IsRenderCached(int pageNo) = 0;
     virtual void CleanUp(DisplayModel* dm) = 0;
     virtual void RenderThumbnail(DisplayModel* dm, Size size, const OnBitmapRendered*) = 0;
     // ChmModel //

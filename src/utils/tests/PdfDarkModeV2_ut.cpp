@@ -136,6 +136,11 @@ void PdfDarkModeV2_UnitTests() {
     utassert(!PdfDarkModeV2PhotoRectIsLightIllustrationWash(0.20f, 0.00f, 0.40f, 0.04f));
     utassert(!PdfDarkModeV2PhotoRectIsLightIllustrationWash(0.20f, 0.00f, 0.835f, 0.22f));
 
+    // Mostly gray full-bleed photo (RAZ geese): keep original, do not Okular it.
+    utassert(PdfDarkModeV2ShouldKeepOriginalPhotograph(0.12f, 0.045f));
+    utassert(!PdfDarkModeV2ShouldKeepOriginalPhotograph(0.80f, 0.045f));
+    utassert(!PdfDarkModeV2ShouldKeepOriginalPhotograph(0.10f, 0.008f));
+
     // Full-bleed photo: colorful continuous tone with no white-paper frame.
     utassert(PdfDarkModeV2ShouldPreserveFullBleedPhoto(0.15f, 0.55f, 0.64f, 0.080f));
     // Photo inset on white paper (photo book / every tested RAZ page): keep rect protection.

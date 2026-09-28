@@ -24,6 +24,33 @@
 #include "mupdf/ucdn.h"
 #include "html-imp.h"
 
+/* Sumatra: dark-theme EPUB images. NULL keeps the original image.
+   A returned image is owned by the caller. */
+typedef fz_image* (*fz_html_recolor_image_fn)(fz_context* ctx, fz_image* image);
+static fz_html_recolor_image_fn g_html_recolor_image;
+
+void fz_html_set_recolor_image_fn(fz_html_recolor_image_fn fn) {
+    g_html_recolor_image = fn;
+}
+
+static void html_fill_image(fz_context* ctx, fz_device* dev, fz_image* image, fz_matrix itm, float alpha) {
+    fz_image* recolored = NULL;
+
+    fz_var(recolored);
+    if (g_html_recolor_image && image) {
+        recolored = g_html_recolor_image(ctx, image);
+    }
+    fz_try(ctx) {
+        fz_fill_image(ctx, dev, recolored ? recolored : image, itm, alpha, fz_default_color_params);
+    }
+    fz_always(ctx) {
+        fz_drop_image(ctx, recolored);
+    }
+    fz_catch(ctx) {
+        fz_rethrow(ctx);
+    }
+}
+
 #include "hb.h"
 #include "hb-ft.h"
 #include <ft2build.h>
@@ -602,6 +629,41 @@ static float layout_page_remainder(layout_data* ld, float y) {
     return page_h - fmodf(y - page_top, page_h);
 }
 
+/* An image that starts a few points before a page edge is painted on both
+ * pages (the top sliver, then the rest). Move the whole line so the image
+ * starts on the next page. Images taller than one page are scaled down. */
+static void keep_flow_images_on_one_page(fz_html_box* box, layout_data* ld, fz_html_flow* a, fz_html_flow* b) {
+    float page_h = ld->page[B] - ld->page[T];
+    float page_top = ld->page[T];
+    fz_html_flow* node;
+
+    if (page_h <= 1.f) return;
+    for (node = a; node != b; node = node->next) {
+        float rel, edge, shift;
+        fz_html_flow* m;
+
+        if (node->type != FLOW_IMAGE || node->h <= 0) continue;
+        if (node->h > page_h) {
+            float t = page_h / node->h;
+            node->w *= t;
+            node->h = page_h;
+        }
+        rel = node->y - page_top;
+        if (rel < 0)
+            edge = page_top;
+        else
+            edge = page_top + (floorf(rel / page_h) + 1.f) * page_h;
+        if (node->y >= edge - 0.5f || node->y + node->h <= edge + 0.5f) continue;
+        shift = edge - node->y;
+        if (shift <= 0.5f) continue;
+        for (m = a; m != b; m = m->next) m->y += shift;
+        box->s.layout.b += shift;
+        if (box->s.layout.b > ld->used[B]) ld->used[B] = box->s.layout.b;
+        ld->bounds[T] = box->s.layout.b;
+        break;
+    }
+}
+
 static int flush_line(fz_context* ctx, fz_html_box* box, layout_data* ld, float line_w, int align, float indent,
                       fz_html_flow* a, fz_html_flow* b, fz_html_restarter* restart) {
     float avail, line_h, baseline;
@@ -635,6 +697,7 @@ static int flush_line(fz_context* ctx, fz_html_box* box, layout_data* ld, float 
     layout_line(ctx, indent, page_w, line_w, align, a, b, box, baseline, line_h);
     box->s.layout.b += line_h;
     if (box->s.layout.b > ld->used[B]) ld->used[B] = box->s.layout.b;
+    keep_flow_images_on_one_page(box, ld, a, b);
     if (restart) restart->potential = NULL;
 
     return 0;
@@ -1275,8 +1338,15 @@ static int pre_position(fz_context* ctx, position_data* pd, layout_data* ld, fz_
             ld->bounds[R] = ld->bounds[L] + auto_w;
         else if (box->style->width.unit == N_PERCENT)
             ld->bounds[R] = ld->bounds[L] + fz_from_css_number(box->style->width, em, containing_w, auto_w);
-        else
-            ld->bounds[R] = ld->bounds[L] + fz_from_css_number(box->style->width, em, auto_w, auto_w);
+        else {
+            float w = fz_from_css_number(box->style->width, em, auto_w, auto_w);
+            /* EPUB figures often set width="900" (CSS px stored as a length).
+             * That box is wider than the page and the right side is clipped.
+             * Fit the block to the page; the image keeps its aspect ratio. */
+            if (auto_w > 0 && w > auto_w) w = auto_w;
+            if (pd->has_width && w < pd->width) pd->width = w;
+            ld->bounds[R] = ld->bounds[L] + w;
+        }
     }
 
     /* Adjust vertically for Height and spacings (noting that we have already done the top ones above!) */
@@ -2951,6 +3021,21 @@ static int layout_block(fz_context* ctx, layout_data* ld, fz_html_box* box) {
 
 // Compute new em, padding, border, margin.
 // Also compute layout x and w.
+/* True when this block exists only to hold an <img> (display:block makes one). */
+static int box_contains_flow_image(fz_html_box* box) {
+    fz_html_box* child;
+    fz_html_flow* node;
+    if (!box) return 0;
+    if (box->type == BOX_FLOW) {
+        for (node = box->u.flow.head; node; node = node->next)
+            if (node->type == FLOW_IMAGE) return 1;
+        return 0;
+    }
+    for (child = box->down; child; child = child->next)
+        if (box_contains_flow_image(child)) return 1;
+    return 0;
+}
+
 static void layout_update_styles(fz_context* ctx, fz_html_box* box, fz_html_box* top) {
     float top_em = top->s.layout.em;
     float top_baseline = top->s.layout.baseline;
@@ -3010,6 +3095,20 @@ static void layout_update_styles(fz_context* ctx, fz_html_box* box, fz_html_box*
                             margin[L] = leftover;
                         else
                             margin[R] = leftover;
+                    }
+                }
+                /* A sized image inside a text-align:center paragraph used to
+                 * center as inline content. display:block takes it out of that
+                 * line, so the figure sticks to the left while the caption
+                 * (still inline) stays centered. Put the figure back in the
+                 * middle of that paragraph. */
+                if (top && top->style && top->style->text_align == TA_CENTER && style->width.unit != N_AUTO &&
+                    style->width.unit != N_UNDEFINED && box_contains_flow_image(box)) {
+                    float used = box->s.layout.w + border[L] + border[R] + padding[L] + padding[R];
+                    float leftover = top_w - used;
+                    if (leftover > 1.f) {
+                        margin[L] = leftover * 0.5f;
+                        margin[R] = leftover - margin[L];
                     }
                 }
             }
@@ -3432,7 +3531,10 @@ static int draw_flow_box(fz_context* ctx, fz_html_box* box, float page_top, floa
             }
 
             if (node->type == FLOW_IMAGE) {
-                if (node->y >= page_bot || node->y + node->h <= page_top) continue;
+                /* An image that starts on the next page still paints into this
+                 * page's bottom margin (the bitmap is taller than the content
+                 * box). Leave it for that page. */
+                if (node->y >= page_bot - 1.f || node->y + node->h <= page_top) continue;
             } else {
                 if (node->y > page_bot || node->y < page_top) continue;
             }
@@ -3609,7 +3711,7 @@ static int draw_flow_box(fz_context* ctx, fz_html_box* box, float page_top, floa
                     float alpha = style->color.a / 255.0f;
                     fz_matrix itm = fz_pre_translate(ctm, node->x, node->y - page_top);
                     itm = fz_pre_scale(itm, node->w, node->h);
-                    fz_fill_image(ctx, dev, node->content.image, itm, alpha, fz_default_color_params);
+                    html_fill_image(ctx, dev, node->content.image, itm, alpha);
                 }
             }
         }
@@ -4642,6 +4744,8 @@ static void do_borders(fz_context* ctx, fz_device* dev, fz_matrix ctm, float pag
     int suppressed_t, suppressed_b;
     int is_first = 1, is_last = 1;
     int is_outer_right = 0;
+    float saved_br = 0;
+    int snap_outer_r = 0;
 
     suppress |= box->suppress_border;
 
@@ -4732,45 +4836,36 @@ static void do_borders(fz_context* ctx, fz_device* dev, fz_matrix ctm, float pag
         draw_rect(ctx, dev, ctm, 0, red, x0 - 1, y1 - 1.5f, x1 + 1, y1 + 1.5f);
         table_geo_printf("RED_H_EDGE x0=%.2f x1=%.2f y=%.2f\n", x0, x1, y1);
     }
+    /* The right stroke sits outside the cell and often lands between device
+     * pixels, so it splits into two gray columns and the horizontal rules
+     * run a pixel past it. Snap that outer edge onto one device pixel and
+     * end the top and bottom rules on the same pixel. */
+    if (is_outer_right && box->type == BOX_TABLE_CELL && border[R] > 0 && paint_r && ctm.b == 0 && ctm.c == 0 &&
+        ctm.a > 0.01f) {
+        float one = 1.f / ctm.a;
+        float outer = x1 + border[R];
+        if (g_html_paint_clip_right > 0 && outer > g_html_paint_clip_right - one) outer = g_html_paint_clip_right - one;
+        float dev_outer = outer * ctm.a + ctm.e;
+        float pix_outer = floorf(dev_outer - 0.001f) + 1.f;
+        float user_outer = (pix_outer - ctm.e) / ctm.a;
+        float nx1 = user_outer - one;
+        if (nx1 < x0) nx1 = x0;
+        saved_br = border[R];
+        border[R] = one;
+        x1 = nx1;
+        snap_outer_r = 1;
+    }
     if (paint_t) draw_border(ctx, dev, ctm, box, T, x0, y0, x1, y1);
     if (paint_r) {
-        /* Outer-right may sit past the page content edge when table min-width
-         * overflows avail_w (HTML autolayout). H edges still appear to end at
-         * the clip; the outward R stroke (x1..x1+br) is entirely clipped.
-         * Clamp to the root page content width so the perimeter stays visible. */
-        if (is_outer_right && box->type == BOX_TABLE_CELL && border[R] > 0) {
-            float page_right = g_html_paint_clip_right > 0 ? g_html_paint_clip_right : (x1 + border[R]);
-            if (x1 + border[R] > page_right + 0.01f) {
-                float br = border[R];
-                /* Keep the hairline fully inside the mediabox: a stroke on
-                 * clip_right vanishes to exclusive clipping / last-pixel AA.
-                 * Inset ~2pt so it stays visible and meets the clipped H ends. */
-                float inset = 2.0f;
-                float xr1 = page_right - inset;
-                float xr0 = xr1 - (br > 0.5f ? br : 0.5f);
-                if (xr0 < x0) xr0 = x0;
-                if (xr1 <= xr0) xr1 = xr0 + 0.5f;
-                if (table_geo_enabled())
-                    table_geo_printf("EDGE V outer-right CLAMP x1=%.3f+br -> paint=%.3f..%.3f clip_right=%.3f\n", x1,
-                                     xr0, xr1, page_right);
-                if (red_outer_r && red_outer_r[0]) {
-                    fz_css_color red = {255, 0, 0, 255};
-                    draw_rect(ctx, dev, ctm, 0, red, xr1 - 3.0f, y0, xr1, y1);
-                }
-                draw_rect(ctx, dev, ctm, 0, box->style->border_color[R], xr0, y0 - border[T], xr1, y1 + border[B]);
-            } else {
-                if (red_outer_r && red_outer_r[0]) {
-                    fz_css_color red = {255, 0, 0, 255};
-                    draw_rect(ctx, dev, ctm, 0, red, x1 - 1.5f, y0, x1 + 1.5f, y1);
-                }
-                draw_border(ctx, dev, ctm, box, R, x0, y0, x1, y1);
-            }
-        } else {
-            draw_border(ctx, dev, ctm, box, R, x0, y0, x1, y1);
+        if (red_outer_r && red_outer_r[0] && is_outer_right) {
+            fz_css_color red = {255, 0, 0, 255};
+            draw_rect(ctx, dev, ctm, 0, red, x1 - 1.5f, y0, x1 + 1.5f, y1);
         }
+        draw_border(ctx, dev, ctm, box, R, x0, y0, x1, y1);
     }
     if (paint_b) draw_border(ctx, dev, ctm, box, B, x0, y0, x1, y1);
     if (paint_l) draw_border(ctx, dev, ctm, box, L, x0, y0, x1, y1);
+    if (snap_outer_r) border[R] = saved_br;
 }
 
 static int draw_block_box(fz_context* ctx, fz_html_box* box, float page_top, float page_bot, fz_device* dev,
@@ -4969,8 +5064,48 @@ void fz_draw_html(fz_context* ctx, fz_device* dev, fz_matrix ctm, fz_html* html,
 
     ctm = fz_pre_translate(ctm, ml, mt);
 
-    g_html_paint_clip_right = paper_w - ml;
-    fz_draw_restarted_html(ctx, dev, ctm, html->tree.root, y0, y1, NULL);
+    /* Content is laid out in [0, page_h]. The bitmap also includes the page
+     * margin, so an image that starts on the next page was painting its top
+     * into this page's bottom margin. Clip to the content box. */
+    {
+        fz_path* clip = NULL;
+        fz_rect scissor;
+        float ch = y1 - y0;
+        fz_var(clip);
+        fz_try(ctx) {
+            /* Right edge is the paper edge, not cw. An outer table border is
+             * drawn in the right margin (x1..x1+border). Clipping at cw cut
+             * that stroke in half, so the vertical came out gray and the
+             * horizontal rules ran past it. Bottom stays at ch: an image that
+             * starts on the next page must not paint into this page's margin. */
+            float content_right = paper_w - ml;
+            if (content_right < cw) content_right = cw;
+            clip = fz_new_path(ctx);
+            fz_moveto(ctx, clip, 0, 0);
+            fz_lineto(ctx, clip, content_right, 0);
+            fz_lineto(ctx, clip, content_right, ch);
+            fz_lineto(ctx, clip, 0, ch);
+            fz_closepath(ctx, clip);
+            scissor.x0 = 0;
+            scissor.y0 = 0;
+            scissor.x1 = content_right;
+            scissor.y1 = ch;
+            /* Scissor is not transformed by ctm inside fz_clip_path (the path is).
+             * Leaving it in content space cuts `ml` off the right: the last
+             * glyph of a full line disappears once the page has a left margin. */
+            scissor = fz_transform_rect(scissor, ctm);
+            fz_clip_path(ctx, dev, clip, 0, ctm, scissor);
+            g_html_paint_clip_right = content_right;
+            fz_draw_restarted_html(ctx, dev, ctm, html->tree.root, y0, y1, NULL);
+            fz_pop_clip(ctx, dev);
+        }
+        fz_always(ctx) {
+            fz_drop_path(ctx, clip);
+        }
+        fz_catch(ctx) {
+            fz_rethrow(ctx);
+        }
+    }
     g_html_paint_clip_right = prev_clip;
 }
 

@@ -812,6 +812,11 @@ void DisplayModel::RenderFinished(PageRenderRequest* req) {
     // are bounded and this makes completed pages appear immediately.
     if (IsDisplayModelCurrentTab(this)) {
         RepaintDisplay();
+        // The visible page is in the cache now. Prefetch its neighbors so the
+        // next slow scroll is ready, without having blocked this paint.
+        if (PageVisible(req->pageNo)) {
+            RenderVisibleParts();
+        }
     }
 }
 
@@ -2433,28 +2438,35 @@ void DisplayModel::RenderVisibleParts() {
         return;
     }
 
-    // Request visible pages LIFO so the on-screen page renders first.
+    // Paint the on-screen page before any neighbor. A far bookmark jump used to
+    // queue the pages around it first; those held the one render lock, so the
+    // page the user clicked waited. Neighbors are requested only once the
+    // visible page is already cached, which is what makes a slow scroll smooth.
+    bool visibleReady = true;
     for (int pageNo = lastVisiblePage; pageNo >= firstVisiblePage; pageNo--) {
-        cb->RequestRendering(pageNo);
+        cb->RequestRendering(pageNo, true);
+        if (!cb->IsRenderCached(pageNo)) {
+            visibleReady = false;
+        }
     }
-
-    if (gPredictiveRender) {
-        // prerender two more pages in facing and book view modes
-        // if the rendering queue still has place for them
-        if (!IsSingle(GetDisplayMode())) {
-            if (firstVisiblePage > 2) {
-                cb->RequestRendering(firstVisiblePage - 2);
-            }
-            if (lastVisiblePage + 1 < PageCount()) {
-                cb->RequestRendering(lastVisiblePage + 2);
-            }
+    if (!gPredictiveRender || !visibleReady) {
+        return;
+    }
+    // prerender two more pages in facing and book view modes
+    // if the rendering queue still has place for them
+    if (!IsSingle(GetDisplayMode())) {
+        if (firstVisiblePage > 2) {
+            cb->RequestRendering(firstVisiblePage - 2);
         }
-        if (firstVisiblePage > 1) {
-            cb->RequestRendering(firstVisiblePage - 1);
+        if (lastVisiblePage + 1 < PageCount()) {
+            cb->RequestRendering(lastVisiblePage + 2);
         }
-        if (lastVisiblePage < PageCount()) {
-            cb->RequestRendering(lastVisiblePage + 1);
-        }
+    }
+    if (firstVisiblePage > 1) {
+        cb->RequestRendering(firstVisiblePage - 1);
+    }
+    if (lastVisiblePage < PageCount()) {
+        cb->RequestRendering(lastVisiblePage + 1);
     }
 }
 
@@ -2785,10 +2797,32 @@ bool DisplayModel::GoToPrevPage(int scrollY) {
     }
     if (zoomVirtual == kZoomFitContent && -pageInfo->pageOnScreen.y <= top.y) {
         scrollY = 0; // continue, even though the current page isn't fully visible
-    } else if (std::max(-pageInfo->pageOnScreen.y, 0) > scrollY && IsContinuous(GetDisplayMode())) {
-        /* the current page isn't fully visible, so show it first */
-        GoToPage(currPageNo, scrollY);
-        return true;
+    } else if (IsContinuous(GetDisplayMode())) {
+        // scrollY 0 means "top of this page". scrollY < 0 means "bottom"
+        // (GoToPrevPage(true)); it is not a pixel threshold. Comparing it with
+        // max(-pageOnScreen.y, 0) is always true, so a wheel-up on a page that
+        // already fits stays on that page. Show the hidden part first, and
+        // leave the page only once that part is already on screen.
+        bool showedMore = false;
+        if (scrollY < 0) {
+            int pageBottom = pageInfo->pageOnScreen.y + pageInfo->pageOnScreen.dy;
+            if (pageBottom > viewPort.dy + 1) {
+                int showBottom = pageInfo->pos.dy - viewPort.dy + windowMargin.top;
+                if (showBottom < 0) {
+                    showBottom = 0;
+                }
+                int yBefore = viewPort.y;
+                GoToPage(currPageNo, showBottom);
+                showedMore = viewPort.y != yBefore;
+            }
+        } else if (pageInfo->pageOnScreen.y < 0) {
+            int yBefore = viewPort.y;
+            GoToPage(currPageNo, scrollY);
+            showedMore = viewPort.y != yBefore;
+        }
+        if (showedMore) {
+            return true;
+        }
     }
     int firstPageInNewRow = FirstPageInARowNo(currPageNo - columns, columns, IsBookView(GetDisplayMode()));
     if (firstPageInNewRow < 1 || 1 == currPageNo) {
@@ -2798,7 +2832,17 @@ bool DisplayModel::GoToPrevPage(int scrollY) {
 
     // scroll to the bottom of the page
     if (-1 == scrollY) {
-        scrollY = GetPageInfo(firstPageInNewRow)->pageOnScreen.dy;
+        PageInfo* prevInfo = GetPageInfo(firstPageInNewRow);
+        if (IsContinuous(GetDisplayMode())) {
+            // GoToPage adds scrollY to the page top. The full page height lands the
+            // view on the next page again, so fit-page wheel-up never left it.
+            scrollY = prevInfo->pos.dy - viewPort.dy + windowMargin.top + windowMargin.bottom;
+            if (scrollY < 0) {
+                scrollY = 0;
+            }
+        } else {
+            scrollY = prevInfo->pageOnScreen.dy;
+        }
     }
 
     GoToPage(firstPageInNewRow, scrollY);

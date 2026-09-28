@@ -309,7 +309,7 @@ static MenuDef menuDefView[] = {
         CmdDeskewAllScannedPages,
     },
     {
-        _TRN("Rotate PDF Pages..."),
+        _TRN("Manually Adjust Pages..."),
         CmdPdfRotatePages,
     },
     {
@@ -897,7 +897,7 @@ static MenuDef menuDefContext[] = {
         CmdDeskewPage,
     },
     {
-        _TRN("Rotate PDF Pages..."),
+        _TRN("Manually Adjust Pages..."),
         CmdPdfRotatePages,
     },
     {

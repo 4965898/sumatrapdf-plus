@@ -71,6 +71,15 @@ enum class PdfDocumentColorMode {
     Light = 2,
 };
 
+// Manual image choice while a dark theme is on and document color mode is Match theme.
+// Auto is the existing per-image classifier. Original leaves pixels unchanged.
+// Tone reseats lightness onto the theme in OKLab and keeps hue.
+enum class PdfImageDarkStrategy {
+    Auto = 0,
+    Original,
+    Tone,
+};
+
 // Per-render dark mode path (View target only for Smart/Legacy PDF paths).
 enum class PageColorMode {
     Normal,
@@ -166,6 +175,14 @@ void BuildViewDarkModeProfile(EngineBase* engine, DarkModeProfile* profile);
 u32 PdfDarkModeComputeProfileHash(const DarkModeProfile* profile);
 PdfDocumentColorMode GetPdfDocumentColorMode();
 void SetPdfDocumentColorMode(PdfDocumentColorMode mode);
+// Auto unless a dark theme is on, document color mode is Match theme, and the user picked another strategy.
+PdfImageDarkStrategy GetPdfImageDarkStrategy();
+void SetPdfImageDarkStrategy(PdfImageDarkStrategy strategy);
+DarkModePalette PdfDarkModeThemePalette();
+// OKLab tone map: hue stays, lightness is reseated onto the theme.
+fz_image* PdfDarkModeRecolorImage(fz_context* ctx, fz_image* src, const DarkModePalette& palette);
+// FollowThemeV2 automatic image treatment, without a page matrix. Null means draw the source unchanged.
+fz_image* PdfDarkModeAutoProcessImage(fz_context* ctx, fz_image* src, const DarkModePalette& palette);
 const char* PdfDocumentColorModeDescription(PdfDocumentColorMode mode);
 // Reflow EPUB/MOBI (MuPDF): Match-theme mode recolors the rendered page bitmap (including images).
 bool ReflowEbookUsesThemeBitmapRecolor();
@@ -234,6 +251,9 @@ bool PdfDarkModePdfMetadataSuggestsImageConversionPictureBook(fz_context* ctx, p
 void PdfDarkModeInvalidatePage(fz_context* ctx, FzPageInfo* pageInfo);
 
 bool PdfDarkModeImageHasPreservablePhotoRects(fz_context* ctx, fz_image* image);
+// Whole-tile recolor must not run on a photograph. Gray photos with a little
+// color were missed by the thumbnail and then painted as 红头.
+bool PdfDarkModeImageShouldStayOriginal(fz_context* ctx, fz_image* image);
 // Full-decode portrait probe: B&W face on paper (RAZ) vs colored illustration on notebook scan.
 bool PdfDarkModeImageDecodeLooksLikeGrayscalePortrait(fz_context* ctx, fz_image* image);
 
@@ -250,6 +270,23 @@ DarkImagePolicy PdfDarkModePolicyForFollowThemeImage(const RectF& imgBounds, boo
 
 // OKLab perceptual remap for SmartDark text/vector colors (Phase 2).
 void MapRgbToDarkThemeOklab(float r, float g, float b, const DarkModePalette& palette, float* outRgb);
+// A light marker (yellow highlight bar) drawn under text. Park it darker than the
+// theme text so the inverted glyphs stay readable, and keep the hue visible.
+void MapRgbLightMarkerToDarkTheme(float r, float g, float b, const DarkModePalette& palette, float* outRgb);
+// Highlight shoulder only: compress the bright end, keep hue, do not invert. The Tone
+// strategy does not use this; it reseats lightness onto the theme in OKLab.
+void MapRgbPhotoDarkAdapt(float r, float g, float b, const DarkModePalette& palette, float* outRgb);
+// Tone on a whole picture, then blend some of the original face back in.
+// The live path uses the semantic mix: face about 60%, eyes and mouth 100%.
+// PdfDarkModeToneThemeVariant writes one of the comparison grades 0..6 (A..G).
+bool PdfDarkModeToneThemeRgbSamples(unsigned char* samples, int w, int h, int n, int stride,
+                                    const DarkModePalette& palette);
+// 0 dark only, 1..4 uniform 50/65/80/100, 5 semantic (face 60, eyes/mouth 100), 6 mild original face.
+bool PdfDarkModeToneThemeVariant(unsigned char* samples, int w, int h, int n, int stride,
+                                 const DarkModePalette& palette, int variant);
+// Same adapt on an sRGB buffer. Lightness is split into structure and texture; only structure is darkened.
+// n is bytes per pixel (3 or 4). Returns false if the buffer cannot be filtered; pixels are left unchanged.
+bool PdfDarkModePhotoAdaptRgbSamples(unsigned char* samples, int w, int h, int n, int stride);
 
 // Perceptual distance in OKLab (Phase 4 background matching).
 float PdfDarkModeOklabDistance(float r1, float g1, float b1, float r2, float g2, float b2);

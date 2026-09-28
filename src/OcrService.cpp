@@ -185,42 +185,13 @@ bool OcrAutoEnabled(MainWindow* win) {
     return tab && tab->autoOcrOn;
 }
 
-// Does this document have any usable text layer? Capped scan: native text
-// PDFs almost always have text on the first pages, image-only scans have
-// none anywhere, so scanning a bounded prefix keeps document load fast.
-static bool DocHasAnyTextLayerCapped(EngineBase* engine, int maxPages) {
-    if (!engine) {
-        return false;
-    }
-    int n = std::min(engine->PageCount(), maxPages);
-    for (int pageNo = 1; pageNo <= n; pageNo++) {
-        if (engine->HasCachedOcrText(pageNo)) {
-            return true;
-        }
-        int len = 0;
-        const WCHAR* text = engine->GetTextForPage(pageNo, &len);
-        if (CountUsableChars(text) >= 20) {
-            return true;
-        }
-    }
-    return false;
-}
-
 void ApplyAutoOcrDefaultForTab(WindowTab* tab) {
-    // DEFAULT POLICY ONLY: auto OCR starts ON exclusively for image-only
-    // scanned PDFs (supported engine, no usable text layer anywhere). Docs
-    // with a native or already-OCR'd text layer - and non-PDF formats such
-    // as EPUB - start OFF but stay manually toggleable via the toolbar.
-    // This must never be used to block the user from enabling it later.
+    // Auto OCR is manual. Opening a scan must not turn it on. The caller
+    // restores the per-document flag after this, when that file has one.
     if (!tab) {
         return;
     }
     tab->autoOcrOn = false;
-    EngineBase* engine = tab->GetEngine();
-    if (!OcrEngineKindSupported(engine) || !OcrModelsAvailable()) {
-        return;
-    }
-    tab->autoOcrOn = !DocHasAnyTextLayerCapped(engine, 60);
 }
 
 bool OcrDeferExtractUntilDocumentReady(MainWindow* win, bool persistToDisk) {
@@ -2294,7 +2265,12 @@ bool OcrRecognizeEnginePage(EngineBase* engine, int pageNo, bool forceOcr, OcrOp
         OcrPageTiming timing{};
         LARGE_INTEGER tPage = TimeGet();
         LARGE_INTEGER tRaster = TimeGet();
-        RenderedBitmap* bmp = RenderPageForOcrMaybeDeskew(engine, pageNo, tocCoarse ? 1440.f : 0.f);
+        // Opening a scan turns Auto OCR on. That pass only adds text. It does
+        // not deskew the page or write /Rotate. Turning and straightening stay
+        // on the Manually Adjust Pages command.
+        bool orientPages = op != OcrOperation::Auto;
+        RenderedBitmap* bmp = orientPages ? RenderPageForOcrMaybeDeskew(engine, pageNo, tocCoarse ? 1440.f : 0.f)
+                                          : RenderPageForOcr(engine, pageNo, nullptr, tocCoarse ? 1440.f : 0.f);
         timing.rasterizeMs = TimeSinceInMs(tRaster);
         logfa("OCR[%d] bmp=%p valid=%d\n", pageNo, bmp, bmp ? bmp->IsValid() : 0);
         if (bmp && bmp->IsValid()) {
@@ -2318,8 +2294,13 @@ bool OcrRecognizeEnginePage(EngineBase* engine, int pageNo, bool forceOcr, OcrOp
                 float modelConf = 0;
                 int modelAltDeg = 0;
                 float modelAltConf = 0;
-                bool modelOk = OcrClassifyPageOrientationRgb(rgb, w, h, stride, &modelDeg, &modelConf, &modelAltDeg,
-                                                             &modelAltConf);
+                bool modelOk = false;
+                if (orientPages) {
+                    modelOk = OcrClassifyPageOrientationRgb(rgb, w, h, stride, &modelDeg, &modelConf, &modelAltDeg,
+                                                            &modelAltConf);
+                } else {
+                    logfa("OCR[%d] auto: keep page angle (no rotate, no deskew)\n", pageNo);
+                }
                 // The classifier sees the same raster as the user (PDF /Rotate already
                 // applied). A confident upright answer means the current /Rotate is
                 // doing its job — do not let a near-tie OCR score tip the page.
@@ -2398,9 +2379,13 @@ bool OcrRecognizeEnginePage(EngineBase* engine, int pageNo, bool forceOcr, OcrOp
                         logfa("OCR[%d] skip rotate (model upright conf=%.2f pdfRot=%d score0=%d)\n", pageNo, modelConf,
                               pdfRot, score0);
                     }
+                    if (!orientPages) {
+                        shouldTryHeuristic = false;
+                        hasModelHint = false;
+                    }
                     logfa("OCR[%d] vertical0=%d shouldTryHeuristic=%d pdfRot=%d\n", pageNo, vertical0,
                           shouldTryHeuristic, pdfRot);
-                    if (hasModelHint || shouldTryHeuristic) {
+                    if (orientPages && (hasModelHint || shouldTryHeuristic)) {
                         int bestScore = score0;
                         int bestRot = 0;
                         Vec<OcrBox> bestBoxes;
@@ -2509,6 +2494,9 @@ bool OcrRecognizeEnginePage(EngineBase* engine, int pageNo, bool forceOcr, OcrOp
                     }
                 } else if (usedRot != 0) {
                     logfa("OCR[%d] post-check: rotation from model, skipping vertical0 guard\n", pageNo);
+                }
+                if (!orientPages) {
+                    usedRot = 0;
                 }
                 if (OcrPageBoxesAreVertical(boxes)) {
                     SortOcrBoxesVerticalReading(boxes);

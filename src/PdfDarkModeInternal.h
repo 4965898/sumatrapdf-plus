@@ -18,6 +18,9 @@ void PdfDarkModeEngineCacheClear(fz_context* ctx, DarkModeEngineCache* cache);
 void PdfDarkModeEngineCacheSetLayoutTextbookFastRemap(DarkModeEngineCache* cache, bool enabled);
 bool PdfDarkModeEngineCacheLayoutTextbookFastRemap(const DarkModeEngineCache* cache);
 
+// SUMATRA_PAGE_PERF=1. Times dark-mode page render so a slow TOC jump can be measured.
+bool PdfDarkModePagePerfOn();
+
 bool PdfDarkModeEngineCacheLookupFeatures(DarkModeEngineCache* cache, fz_image* image, DarkImageFeatures* outFeatures,
                                           PixelColor* outBackground);
 void PdfDarkModeEngineCacheStoreFeatures(fz_context* ctx, DarkModeEngineCache* cache, fz_image* image,

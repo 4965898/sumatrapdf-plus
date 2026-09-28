@@ -6,6 +6,8 @@ extern "C" {
 }
 
 #include "utils/BaseUtil.h"
+#include "utils/Log.h"
+#include "utils/Timer.h"
 
 #include "Settings.h"
 #include "GlobalPrefs.h"
@@ -21,6 +23,14 @@ static constexpr int kPreservePdfImagesMinSize = 72;
 static constexpr PdfDarkModeRenderer kPdfDarkModeRenderer = PdfDarkModeRenderer::ObjectLevelDevice;
 
 static bool gPreservePdfImagesInDarkMode = true;
+
+bool PdfDarkModePagePerfOn() {
+    static int on = -1;
+    if (on < 0) {
+        on = GetEnvironmentVariableA("SUMATRA_PAGE_PERF", nullptr, 0) > 0 ? 1 : 0;
+    }
+    return on == 1;
+}
 
 static PdfDocumentColorMode PdfDocumentColorModeFromString(const char* v) {
     if (!v || !*v || str::EqI(v, "auto") || str::EqI(v, "smart")) {
@@ -97,6 +107,50 @@ PdfDocumentColorMode GetPdfDocumentColorMode() {
         return PdfDocumentColorMode::Auto;
     }
     return PdfDocumentColorModeFromString(gGlobalPrefs->documentColorMode);
+}
+
+static const char* PdfImageDarkStrategyToString(PdfImageDarkStrategy strategy) {
+    switch (strategy) {
+        case PdfImageDarkStrategy::Original:
+            return "original";
+        case PdfImageDarkStrategy::Tone:
+            return "tone";
+        case PdfImageDarkStrategy::Auto:
+        default:
+            return "auto";
+    }
+}
+
+PdfImageDarkStrategy GetPdfImageDarkStrategy() {
+    if (!ThemeUsesDarkChrome() || GetPdfDocumentColorMode() != PdfDocumentColorMode::Auto) {
+        return PdfImageDarkStrategy::Auto;
+    }
+    if (!gGlobalPrefs || !gGlobalPrefs->documentImageDarkStrategy) {
+        return PdfImageDarkStrategy::Auto;
+    }
+    const char* v = gGlobalPrefs->documentImageDarkStrategy;
+    if (str::EqI(v, "original")) {
+        return PdfImageDarkStrategy::Original;
+    }
+    // Retired per-channel invert. Tone covers the same job and keeps hue.
+    if (str::EqI(v, "simple")) {
+        str::ReplaceWithCopy(&gGlobalPrefs->documentImageDarkStrategy, "tone");
+        return PdfImageDarkStrategy::Tone;
+    }
+    if (str::EqI(v, "tone")) {
+        return PdfImageDarkStrategy::Tone;
+    }
+    return PdfImageDarkStrategy::Auto;
+}
+
+void SetPdfImageDarkStrategy(PdfImageDarkStrategy strategy) {
+    if (!gGlobalPrefs) {
+        return;
+    }
+    const char* name = PdfImageDarkStrategyToString(strategy);
+    if (!str::EqI(gGlobalPrefs->documentImageDarkStrategy, name)) {
+        str::ReplaceWithCopy(&gGlobalPrefs->documentImageDarkStrategy, name);
+    }
 }
 
 void SetPdfDocumentColorMode(PdfDocumentColorMode mode) {
@@ -682,6 +736,8 @@ struct DmPbPhotoRect {
     int y1 = 0;
     // Side-harvested sparse drawings (line art). Skip photo-mat flood / callout drop.
     bool sparse = false;
+    // Closed black frame around a color drawing. Interior stays original; no flood.
+    bool framed = false;
 };
 
 static constexpr int kDmPbMaxPhotoRects = 8;
@@ -797,7 +853,8 @@ struct DmPbPageStats {
 static DmPbPageStats dm_pb_estimate_page_stats(fz_context* ctx, fz_pixmap* src, fz_colorspace* cs, fz_colorspace* rgb,
                                                int components);
 static bool dm_pb_should_seek_photo_rects(float satRatio, float chromaRatio, float paperRatio, float lumVar,
-                                          const DarkImageAnalysis* imgAnalysis);
+                                          float borderPaperRatio, const DarkImageAnalysis* imgAnalysis);
+static bool dm_pb_pixmap_has_picture_island(fz_context* ctx, fz_pixmap* pix);
 
 // Flat near-white used for oval-portrait rectangular mats (not specular highlights).
 // JPEG mats often sit at 0.88–0.93; 0.94 left a light AA ring around the oval.
@@ -832,7 +889,7 @@ static u8* dm_pb_build_edge_connected_margin_mask(fz_context* ctx, fz_pixmap* pi
         int y0 = r.y0 < 0 ? 0 : r.y0;
         int x1 = r.x1 > w ? w : r.x1;
         int y1 = r.y1 > h ? h : r.y1;
-        if (x1 - x0 < 4 || y1 - y0 < 4 || r.sparse) {
+        if (x1 - x0 < 4 || y1 - y0 < 4 || r.sparse || r.framed) {
             continue;
         }
         for (int y = y0; y < y1; y++) {
@@ -1133,6 +1190,45 @@ bool PdfDarkModeImageDecodeLooksLikeGrayscalePortrait(fz_context* ctx, fz_image*
     return portrait;
 }
 
+bool PdfDarkModeImageShouldStayOriginal(fz_context* ctx, fz_image* image) {
+    if (!ctx || !image) {
+        return false;
+    }
+    fz_pixmap* src = nullptr;
+    bool stay = false;
+    fz_var(src);
+    fz_try(ctx) {
+        src = dm_pb_decode_image(ctx, image);
+        if (!src || !src->samples || src->w < 8 || src->h < 8) {
+            fz_throw(ctx, FZ_ERROR_GENERIC, "empty image for original-photo probe");
+        }
+        fz_colorspace* cs = src->colorspace ? src->colorspace : fz_device_rgb(ctx);
+        fz_colorspace* rgb = fz_device_rgb(ctx);
+        int components = fz_colorspace_n(ctx, cs);
+        DmPbPageStats st = dm_pb_estimate_page_stats(ctx, src, cs, rgb, components);
+        // Flat paper with little color is a text/office scan, not a photo.
+        bool textPage = st.paperRatio >= 0.70f && st.satRatio < 0.08f && st.lumVar < 0.040f;
+        // 连环画 / line art: modest color, paper still dominates.
+        bool lineArt = st.satRatio < 0.06f && st.chromaRatio < 0.12f && st.paperRatio >= 0.45f && st.lumVar < 0.050f;
+        if (!textPage && !lineArt && st.lumVar >= 0.018f) {
+            stay = true;
+        } else if (dm_pb_pixmap_has_picture_island(ctx, src)) {
+            // Mostly white page with a localized color drawing (RAZ "In"). The
+            // thumbnail looks like a text scan; binarize would invert the picture.
+            stay = true;
+        }
+    }
+    fz_always(ctx) {
+        if (src) {
+            fz_drop_pixmap(ctx, src);
+        }
+    }
+    fz_catch(ctx) {
+        stay = false;
+    }
+    return stay;
+}
+
 bool PdfDarkModeImageHasPreservablePhotoRects(fz_context* ctx, fz_image* image) {
     if (!ctx || !image) {
         return false;
@@ -1150,7 +1246,8 @@ bool PdfDarkModeImageHasPreservablePhotoRects(fz_context* ctx, fz_image* image) 
         int components = fz_colorspace_n(ctx, cs);
         DmPbPageStats st = dm_pb_estimate_page_stats(ctx, src, cs, rgb, components);
         DarkImageAnalysis analysis = PdfDarkModeAnalyzeImage(ctx, image, 0.92f, true);
-        if (dm_pb_should_seek_photo_rects(st.satRatio, st.chromaRatio, st.paperRatio, st.lumVar, &analysis)) {
+        if (dm_pb_should_seek_photo_rects(st.satRatio, st.chromaRatio, st.paperRatio, st.lumVar, st.borderPaperRatio,
+                                          &analysis)) {
             DmPbPhotoRect rects[kDmPbMaxPhotoRects] = {};
             int nRects = dm_pb_find_photo_rects(ctx, src, rects, kDmPbMaxPhotoRects, nullptr);
             i64 imgArea = (i64)src->w * src->h;
@@ -1191,7 +1288,8 @@ void PdfDarkModeAppendImagePhotoSkipDevRects(fz_context* ctx, fz_image* image, c
         int components = fz_colorspace_n(ctx, cs);
         DmPbPageStats st = dm_pb_estimate_page_stats(ctx, src, cs, rgb, components);
         DarkImageAnalysis analysis = PdfDarkModeAnalyzeImage(ctx, image, 0.92f, true);
-        if (dm_pb_should_seek_photo_rects(st.satRatio, st.chromaRatio, st.paperRatio, st.lumVar, &analysis)) {
+        if (dm_pb_should_seek_photo_rects(st.satRatio, st.chromaRatio, st.paperRatio, st.lumVar, st.borderPaperRatio,
+                                          &analysis)) {
             DmPbPhotoRect rects[kDmPbMaxPhotoRects] = {};
             int nRects = dm_pb_find_photo_rects(ctx, src, rects, kDmPbMaxPhotoRects, nullptr);
             int pw = src->w;
@@ -1940,7 +2038,7 @@ static DmPbPageStats dm_pb_estimate_page_stats(fz_context* ctx, fz_pixmap* src, 
 // satRatio < 0.04 so they need an extra path — but paper-heavy 连环画 line art must never get
 // partial photo-rect protect (leaves white rectangular patches on an otherwise inverted page).
 static bool dm_pb_should_seek_photo_rects(float satRatio, float chromaRatio, float paperRatio, float lumVar,
-                                          const DarkImageAnalysis* imgAnalysis) {
+                                          float borderPaperRatio, const DarkImageAnalysis* imgAnalysis) {
     // Inset B&W portrait on a paper-heavy RAZ page (Historic Peacemakers Betty Williams):
     // the photo is small so full-page lumVar stays modest (~0.04). 128px thumbs often look
     // like 连环画 / text scans and would veto seeking below — ApplySharp then remaps the
@@ -1974,7 +2072,11 @@ static bool dm_pb_should_seek_photo_rects(float satRatio, float chromaRatio, flo
         // mild paper chroma and a crushed 128px thumb that fails LookLikePhoto — full-page
         // lumVar still shows the portrait. Blocking seek here Okular-inverts the photo.
         bool photographicVariance = satRatio < 0.08f && lumVar >= 0.055f && paperRatio < 0.92f;
-        if (!photographicVariance &&
+        // Pastel RAZ art (Lunch at School: sat 0.11, chroma 0.23) matches the cream
+        // chroma/sat ratio, but the border is blank white paper. 红楼梦 keeps a
+        // printed border (p.7 borderPaper 0.02, p.56 0.31) and must still skip rects.
+        bool whiteMarginColorPage = borderPaperRatio >= 0.70f && satRatio >= 0.08f;
+        if (!photographicVariance && !whiteMarginColorPage &&
             (!imgAnalysis || (!PdfDarkModeFeaturesLookLikeGrayscalePhoto(imgAnalysis->features) &&
                               !PdfDarkModeFeaturesLookLikePhoto(imgAnalysis->features)))) {
             return false;
@@ -2015,6 +2117,15 @@ static bool dm_pb_point_in_photo_rects(int x, int y, const DmPbPhotoRect* rects,
     return false;
 }
 
+static bool dm_pb_point_in_framed_rect(int x, int y, const DmPbPhotoRect* rects, int nRects) {
+    for (int i = 0; i < nRects; i++) {
+        if (rects[i].framed && x >= rects[i].x0 && x < rects[i].x1 && y >= rects[i].y0 && y < rects[i].y1) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool dm_pb_point_in_sparse_rect(int x, int y, const DmPbPhotoRect* rects, int nRects) {
     for (int i = 0; i < nRects; i++) {
         if (rects[i].sparse && x >= rects[i].x0 && x < rects[i].x1 && y >= rects[i].y0 && y < rects[i].y1) {
@@ -2022,6 +2133,245 @@ static bool dm_pb_point_in_sparse_rect(int x, int y, const DmPbPhotoRect* rects,
         }
     }
     return false;
+}
+
+static bool dm_pb_frame_ink(float r, float g, float b) {
+    float maxC = r > g ? (r > b ? r : b) : (g > b ? g : b);
+    float minC = r < g ? (r < b ? r : b) : (g < b ? g : b);
+    float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+    return lum < 0.62f && (maxC - minC) < 0.22f;
+}
+
+static bool dm_pb_frame_margin(float r, float g, float b) {
+    float maxC = r > g ? (r > b ? r : b) : (g > b ? g : b);
+    float minC = r < g ? (r < b ? r : b) : (g < b ? g : b);
+    float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+    return lum > 0.85f && (maxC - minC) < 0.12f;
+}
+
+// First-to-last dark pixels on a row. Small gaps where the drawing touches the
+// stroke still count, as long as most of that span is ink.
+static bool dm_pb_frame_row_span(fz_context* ctx, fz_pixmap* pix, fz_colorspace* cs, fz_colorspace* rgb,
+                                int components, int y, int* outA, int* outB) {
+    int w = pix->w;
+    int a = -1;
+    int b = -1;
+    int darkN = 0;
+    for (int x = 0; x < w; x++) {
+        float r, g, bch;
+        dm_pb_sample_rgb(ctx, pix, cs, rgb, components, x, y, &r, &g, &bch);
+        if (!dm_pb_frame_ink(r, g, bch)) {
+            continue;
+        }
+        if (a < 0) {
+            a = x;
+        }
+        b = x + 1;
+        darkN++;
+    }
+    if (a < 0 || b - a < w * 45 / 100) {
+        return false;
+    }
+    if (darkN * 100 < (b - a) * 75) {
+        return false;
+    }
+    *outA = a;
+    *outB = b;
+    return true;
+}
+
+static float dm_pb_frame_paper_frac(fz_context* ctx, fz_pixmap* pix, fz_colorspace* cs, fz_colorspace* rgb,
+                                    int components, int x0, int x1, int y0, int y1, int vertical) {
+    int n = 0;
+    int hit = 0;
+    int w = pix->w;
+    int h = pix->h;
+    if (vertical) {
+        int x = x0;
+        if (x < 0 || x >= w) {
+            return 0.f;
+        }
+        for (int y = y0; y < y1; y += 2) {
+            if (y < 0 || y >= h) {
+                continue;
+            }
+            float r, g, b;
+            dm_pb_sample_rgb(ctx, pix, cs, rgb, components, x, y, &r, &g, &b);
+            n++;
+            if (dm_pb_frame_margin(r, g, b)) {
+                hit++;
+            }
+        }
+    } else {
+        int y = y0;
+        if (y < 0 || y >= h) {
+            return 0.f;
+        }
+        for (int x = x0; x < x1; x += 2) {
+            if (x < 0 || x >= w) {
+                continue;
+            }
+            float r, g, b;
+            dm_pb_sample_rgb(ctx, pix, cs, rgb, components, x, y, &r, &g, &b);
+            n++;
+            if (dm_pb_frame_margin(r, g, b)) {
+                hit++;
+            }
+        }
+    }
+    return n > 0 ? (float)hit / (float)n : 0.f;
+}
+
+static float dm_pb_frame_ink_frac_col(fz_context* ctx, fz_pixmap* pix, fz_colorspace* cs, fz_colorspace* rgb,
+                                      int components, int x, int y0, int y1) {
+    int n = 0;
+    int hit = 0;
+    for (int y = y0; y < y1; y += 2) {
+        float r, g, b;
+        dm_pb_sample_rgb(ctx, pix, cs, rgb, components, x, y, &r, &g, &b);
+        n++;
+        if (dm_pb_frame_ink(r, g, b)) {
+            hit++;
+        }
+    }
+    return n > 0 ? (float)hit / (float)n : 0.f;
+}
+
+// A thin black rectangle with white paper outside and a color drawing inside.
+// Text boxes and cream line-art panels fail the interior color check.
+static bool dm_pb_find_ink_frame(fz_context* ctx, fz_pixmap* pix, DmPbPhotoRect* out) {
+    if (!ctx || !pix || !pix->samples || !out || pix->w < 40 || pix->h < 40) {
+        return false;
+    }
+    fz_colorspace* cs = pix->colorspace ? pix->colorspace : fz_device_rgb(ctx);
+    fz_colorspace* rgb = fz_device_rgb(ctx);
+    int components = fz_colorspace_n(ctx, cs);
+    int w = pix->w;
+    int h = pix->h;
+
+    // Outermost stroke. A broken run still counts when most of the span is ink
+    // and the paper outside the line is white (cookie page: the drawing cuts the line).
+    int topY = -1;
+    int topA = 0;
+    int topB = 0;
+    for (int y = 6; y < h * 55 / 100; y++) {
+        int a, b;
+        if (!dm_pb_frame_row_span(ctx, pix, cs, rgb, components, y, &a, &b)) {
+            continue;
+        }
+        if (dm_pb_frame_paper_frac(ctx, pix, cs, rgb, components, a, b, y - 3, y - 3, 0) < 0.80f) {
+            continue;
+        }
+        topY = y;
+        topA = a;
+        topB = b;
+        break;
+    }
+    int botY = -1;
+    int botA = 0;
+    int botB = 0;
+    for (int y = h - 7; y > h * 45 / 100; y--) {
+        int a, b;
+        if (!dm_pb_frame_row_span(ctx, pix, cs, rgb, components, y, &a, &b)) {
+            continue;
+        }
+        if (dm_pb_frame_paper_frac(ctx, pix, cs, rgb, components, a, b, y + 3, y + 3, 0) < 0.80f) {
+            continue;
+        }
+        botY = y;
+        botA = a;
+        botB = b;
+        break;
+    }
+    if (topY < 0 || botY < 0 || botY - topY < h / 6) {
+        return false;
+    }
+
+    int leftX = -1;
+    for (int x = 4; x < w * 40 / 100; x++) {
+        if (dm_pb_frame_ink_frac_col(ctx, pix, cs, rgb, components, x, topY, botY) < 0.62f) {
+            continue;
+        }
+        if (dm_pb_frame_paper_frac(ctx, pix, cs, rgb, components, x - 3, x - 3, topY, botY, 1) < 0.75f) {
+            continue;
+        }
+        leftX = x;
+        break;
+    }
+    int rightX = -1;
+    for (int x = w - 5; x > w * 60 / 100; x--) {
+        if (dm_pb_frame_ink_frac_col(ctx, pix, cs, rgb, components, x, topY, botY) < 0.62f) {
+            continue;
+        }
+        if (dm_pb_frame_paper_frac(ctx, pix, cs, rgb, components, x + 3, x + 3, topY, botY, 1) < 0.75f) {
+            continue;
+        }
+        rightX = x;
+        break;
+    }
+    if (leftX < 0 || rightX < 0 || rightX - leftX < w / 4) {
+        return false;
+    }
+    if (topA > leftX + 12 || topB < rightX - 12 || botA > leftX + 12 || botB < rightX - 12) {
+        return false;
+    }
+
+    int x0 = leftX;
+    int y0 = topY;
+    int x1 = rightX + 1;
+    int y1 = botY + 1;
+    int samples = 0;
+    int colorN = 0;
+    int paperN = 0;
+    for (int y = y0 + 2; y < y1 - 2; y += 4) {
+        for (int x = x0 + 2; x < x1 - 2; x += 4) {
+            float r, g, b;
+            dm_pb_sample_rgb(ctx, pix, cs, rgb, components, x, y, &r, &g, &b);
+            samples++;
+            float maxC = r > g ? (r > b ? r : b) : (g > b ? g : b);
+            float minC = r < g ? (r < b ? r : b) : (g < b ? g : b);
+            float chroma = maxC - minC;
+            float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+            if (chroma >= 0.15f) {
+                colorN++;
+            }
+            if (chroma < 0.08f && lum > 0.88f) {
+                paperN++;
+            }
+        }
+    }
+    if (samples < 16) {
+        return false;
+    }
+    float colorFrac = (float)colorN / (float)samples;
+    float paperFrac = (float)paperN / (float)samples;
+    // Color drawing, not a ruled text box and not cream line art.
+    // Pastel pages in this book sit near 0.16; text boxes are mostly paper.
+    if (colorFrac < 0.14f || paperFrac >= 0.50f) {
+        return false;
+    }
+    out->x0 = x0;
+    out->y0 = y0;
+    out->x1 = x1;
+    out->y1 = y1;
+    out->sparse = false;
+    out->framed = true;
+    return true;
+}
+
+static int dm_pb_append_ink_frame(fz_context* ctx, fz_pixmap* pix, DmPbPhotoRect* rects, int nRects, int maxRects) {
+    if (!rects || maxRects <= 0) {
+        return nRects;
+    }
+    DmPbPhotoRect frame;
+    if (!dm_pb_find_ink_frame(ctx, pix, &frame)) {
+        return nRects;
+    }
+    if (nRects >= maxRects) {
+        nRects = maxRects - 1;
+    }
+    rects[nRects] = frame;
+    return nRects + 1;
 }
 
 // Text that overlaps a photo rect sits on the flooded white mat, not on the photo.
@@ -2256,9 +2606,11 @@ fz_pixmap* PdfDarkModeProcessPictureBookPixmap(fz_context* ctx, fz_pixmap* src, 
     int nPhotoRects = 0;
     // Colorful pages + B&W documentary portraits: protect photo rects. B&W ink lines (连环画)
     // register as dense via luminance contrast but have no color — full-page remap only.
-    if (dm_pb_should_seek_photo_rects(satRatio, chromaRatio, paperRatio, lumVar, imgAnalysis)) {
+    if (dm_pb_should_seek_photo_rects(satRatio, chromaRatio, paperRatio, lumVar, st.borderPaperRatio, imgAnalysis)) {
         nPhotoRects = dm_pb_find_photo_rects(ctx, src, photoRects, kDmPbMaxPhotoRects, lumPlane);
     }
+    // Black frame: the drawing inside stays original. Flood stays outside the stroke.
+    nPhotoRects = dm_pb_append_ink_frame(ctx, src, photoRects, nPhotoRects, kDmPbMaxPhotoRects);
     fz_pixmap* dst = fz_new_pixmap(ctx, cs, w, h, src->seps, src->alpha);
     fz_copy_pixmap_rect(ctx, dst, src, fz_make_irect(0, 0, w, h), nullptr);
 
@@ -2487,6 +2839,11 @@ fz_pixmap* PdfDarkModeProcessPictureBookPixmap(fz_context* ctx, fz_pixmap* src, 
             }
             bool sparseBgOnly = false;
             if (nPhotoRects > 0 && dm_pb_point_in_photo_rects(x, y, photoRects, nPhotoRects)) {
+                // Closed black frame: original pixels, including light walls and white
+                // objects. Do not flood or ink-remap anything inside the stroke.
+                if (dm_pb_point_in_framed_rect(x, y, photoRects, nPhotoRects)) {
+                    continue;
+                }
                 if (dm_pb_point_in_sparse_rect(x, y, photoRects, nPhotoRects)) {
                     // Sparse line art: swap flat paper for theme background, keep every
                     // stroke (pale wings, colored body) untouched — no white slab, and
@@ -2607,6 +2964,509 @@ fz_pixmap* PdfDarkModeProcessPictureBookPixmap(fz_context* ctx, fz_pixmap* src, 
     return dst;
 }
 
+// A color drawing or photo sitting on white paper, even when the page is mostly
+// blank. The picture is the chromatic island; the white around it and the glyphs
+// on that white are the margin. One rule for framed cartoons, inset photos, and
+// captioned figures — no separate frame or "is it a photo" gate.
+static int dm_pb_collect_picture_islands(fz_context* ctx, fz_pixmap* pix, DmPbPhotoRect* out, int maxOut) {
+    if (!ctx || !pix || !pix->samples || !out || maxOut <= 0 || pix->w < 32 || pix->h < 32) {
+        return 0;
+    }
+    fz_colorspace* cs = pix->colorspace ? pix->colorspace : fz_device_rgb(ctx);
+    fz_colorspace* rgb = fz_device_rgb(ctx);
+    int components = fz_colorspace_n(ctx, cs);
+    int w = pix->w;
+    int h = pix->h;
+    int step = (w > 500 || h > 500) ? 4 : 2;
+    int cw = (w + step - 1) / step;
+    int ch = (h + step - 1) / step;
+    u8* mark = AllocArray<u8>((size_t)cw * ch);
+    u8* seen = AllocArray<u8>((size_t)cw * ch);
+    int* q = AllocArray<int>((size_t)cw * ch);
+    if (!mark || !seen || !q) {
+        free(mark);
+        free(seen);
+        free(q);
+        return 0;
+    }
+    for (int cy = 0; cy < ch; cy++) {
+        int y = cy * step;
+        if (y >= h) {
+            y = h - 1;
+        }
+        for (int cx = 0; cx < cw; cx++) {
+            int x = cx * step;
+            if (x >= w) {
+                x = w - 1;
+            }
+            float r, g, b;
+            dm_pb_sample_rgb(ctx, pix, cs, rgb, components, x, y, &r, &g, &b);
+            float maxC = r > g ? (r > b ? r : b) : (g > b ? g : b);
+            float minC = r < g ? (r < b ? r : b) : (g < b ? g : b);
+            if (maxC - minC >= 0.14f) {
+                mark[cy * cw + cx] = 1;
+            }
+        }
+    }
+
+    struct IslandBox {
+        int x0, y0, x1, y1, n;
+    };
+    IslandBox boxes[16];
+    int nBoxes = 0;
+    int minCount = (cw * ch) / 500;
+    if (minCount < 6) {
+        minCount = 6;
+    }
+    for (int i = 0; i < cw * ch; i++) {
+        if (!mark[i] || seen[i]) {
+            continue;
+        }
+        int qn = 0;
+        int count = 0;
+        int x0 = cw, y0 = ch, x1 = 0, y1 = 0;
+        seen[i] = 1;
+        q[qn++] = i;
+        while (count < qn) {
+            int cur = q[count++];
+            int cx = cur % cw;
+            int cy = cur / cw;
+            if (cx < x0) {
+                x0 = cx;
+            }
+            if (cy < y0) {
+                y0 = cy;
+            }
+            if (cx + 1 > x1) {
+                x1 = cx + 1;
+            }
+            if (cy + 1 > y1) {
+                y1 = cy + 1;
+            }
+            const int dxs[4] = {-1, 1, 0, 0};
+            const int dys[4] = {0, 0, -1, 1};
+            for (int k = 0; k < 4; k++) {
+                int nx = cx + dxs[k];
+                int ny = cy + dys[k];
+                if (nx < 0 || ny < 0 || nx >= cw || ny >= ch) {
+                    continue;
+                }
+                int ni = ny * cw + nx;
+                if (!mark[ni] || seen[ni]) {
+                    continue;
+                }
+                seen[ni] = 1;
+                q[qn++] = ni;
+            }
+        }
+        if (qn < minCount || nBoxes >= 16) {
+            continue;
+        }
+        boxes[nBoxes].x0 = x0 * step;
+        boxes[nBoxes].y0 = y0 * step;
+        boxes[nBoxes].x1 = x1 * step;
+        boxes[nBoxes].y1 = y1 * step;
+        if (boxes[nBoxes].x1 > w) {
+            boxes[nBoxes].x1 = w;
+        }
+        if (boxes[nBoxes].y1 > h) {
+            boxes[nBoxes].y1 = h;
+        }
+        boxes[nBoxes].n = qn;
+        nBoxes++;
+    }
+    free(mark);
+    free(seen);
+    free(q);
+    if (nBoxes <= 0) {
+        return 0;
+    }
+
+    int parent[16];
+    for (int i = 0; i < nBoxes; i++) {
+        parent[i] = i;
+    }
+    auto findP = [&](int i) -> int {
+        while (parent[i] != i) {
+            i = parent[i];
+        }
+        return i;
+    };
+    for (int i = 0; i < nBoxes; i++) {
+        for (int j = i + 1; j < nBoxes; j++) {
+            int yGap = 0;
+            if (boxes[i].y1 < boxes[j].y0) {
+                yGap = boxes[j].y0 - boxes[i].y1;
+            } else if (boxes[j].y1 < boxes[i].y0) {
+                yGap = boxes[i].y0 - boxes[j].y1;
+            }
+            int xGap = 0;
+            if (boxes[i].x1 < boxes[j].x0) {
+                xGap = boxes[j].x0 - boxes[i].x1;
+            } else if (boxes[j].x1 < boxes[i].x0) {
+                xGap = boxes[i].x0 - boxes[j].x1;
+            }
+            bool sameBand = yGap <= h / 10 && xGap <= w / 3;
+            bool sameStack = xGap <= w / 10 && yGap <= h / 5;
+            if (!sameBand && !sameStack) {
+                continue;
+            }
+            int a = findP(i);
+            int b = findP(j);
+            if (a != b) {
+                parent[b] = a;
+            }
+        }
+    }
+
+    int nOut = 0;
+    int pad = (w < h ? w : h) / 48;
+    if (pad < 16) {
+        pad = 16;
+    }
+    i64 pageArea = (i64)w * h;
+    for (int i = 0; i < nBoxes && nOut < maxOut; i++) {
+        if (findP(i) != i) {
+            continue;
+        }
+        int x0 = boxes[i].x0;
+        int y0 = boxes[i].y0;
+        int x1 = boxes[i].x1;
+        int y1 = boxes[i].y1;
+        for (int j = 0; j < nBoxes; j++) {
+            if (findP(j) != i) {
+                continue;
+            }
+            if (boxes[j].x0 < x0) {
+                x0 = boxes[j].x0;
+            }
+            if (boxes[j].y0 < y0) {
+                y0 = boxes[j].y0;
+            }
+            if (boxes[j].x1 > x1) {
+                x1 = boxes[j].x1;
+            }
+            if (boxes[j].y1 > y1) {
+                y1 = boxes[j].y1;
+            }
+        }
+        x0 -= pad;
+        y0 -= pad;
+        x1 += pad;
+        y1 += pad;
+        if (x0 < 0) {
+            x0 = 0;
+        }
+        if (y0 < 0) {
+            y0 = 0;
+        }
+        if (x1 > w) {
+            x1 = w;
+        }
+        if (y1 > h) {
+            y1 = h;
+        }
+        i64 area = (i64)(x1 - x0) * (y1 - y0);
+        if (area * 100 < pageArea * 2 || area * 100 > pageArea * 88) {
+            continue;
+        }
+        out[nOut].x0 = x0;
+        out[nOut].y0 = y0;
+        out[nOut].x1 = x1;
+        out[nOut].y1 = y1;
+        out[nOut].sparse = false;
+        // Open color region, not a sealed frame. Studio white inside still floods.
+        out[nOut].framed = false;
+        nOut++;
+    }
+    return nOut;
+}
+
+// Flat white that touches an open picture's border is the page or studio mat.
+// Flood it. Do not cross a sealed ink frame, and do not swallow white that the
+// frame (or the subject) has already cut off from that border.
+static u8* dm_pb_build_island_mat_mask(fz_context* ctx, fz_pixmap* pix, fz_colorspace* cs, fz_colorspace* rgb,
+                                       int components, const DmPbPhotoRect* rects, int nRects,
+                                       const DmPbPhotoRect* frame) {
+    if (!pix || !rects || nRects <= 0) {
+        return nullptr;
+    }
+    int w = pix->w;
+    int h = pix->h;
+    u8* mask = AllocArray<u8>((size_t)w * h);
+    u8* paper = AllocArray<u8>((size_t)w * h);
+    if (!mask || !paper) {
+        free(mask);
+        free(paper);
+        return nullptr;
+    }
+    auto inFrame = [&](int x, int y) -> bool {
+        return frame && x >= frame->x0 && x < frame->x1 && y >= frame->y0 && y < frame->y1;
+    };
+    for (int i = 0; i < nRects; i++) {
+        const DmPbPhotoRect& r = rects[i];
+        if (r.framed) {
+            continue;
+        }
+        int x0 = r.x0 < 0 ? 0 : r.x0;
+        int y0 = r.y0 < 0 ? 0 : r.y0;
+        int x1 = r.x1 > w ? w : r.x1;
+        int y1 = r.y1 > h ? h : r.y1;
+        if (x1 - x0 < 4 || y1 - y0 < 4) {
+            continue;
+        }
+        for (int y = y0; y < y1; y++) {
+            for (int x = x0; x < x1; x++) {
+                if (inFrame(x, y)) {
+                    continue;
+                }
+                float rv, gv, bv;
+                dm_pb_sample_rgb(ctx, pix, cs, rgb, components, x, y, &rv, &gv, &bv);
+                if (dm_pb_is_photo_rect_margin_paper_rgb(rv, gv, bv)) {
+                    paper[y * w + x] = 1;
+                }
+            }
+        }
+        int* q = AllocArray<int>((size_t)(x1 - x0) * (y1 - y0));
+        if (!q) {
+            continue;
+        }
+        int qn = 0;
+        auto trySeed = [&](int x, int y) {
+            if (x < x0 || x >= x1 || y < y0 || y >= y1 || inFrame(x, y)) {
+                return;
+            }
+            int idx = y * w + x;
+            if (!paper[idx] || mask[idx]) {
+                return;
+            }
+            mask[idx] = 1;
+            q[qn++] = idx;
+        };
+        int shortSide = (x1 - x0) < (y1 - y0) ? (x1 - x0) : (y1 - y0);
+        int minRun = shortSide / 10;
+        if (minRun < 28) {
+            minRun = 28;
+        }
+        if (minRun > 80) {
+            minRun = 80;
+        }
+        auto flushHoriz = [&](int y, int runEnd, int runLen) {
+            if (runLen < minRun) {
+                return;
+            }
+            for (int t = 0; t < runLen; t++) {
+                trySeed(runEnd - runLen + t, y);
+            }
+        };
+        auto flushVert = [&](int x, int runEnd, int runLen) {
+            if (runLen < minRun) {
+                return;
+            }
+            for (int t = 0; t < runLen; t++) {
+                trySeed(x, runEnd - runLen + t);
+            }
+        };
+        for (int edge = 0; edge < 2; edge++) {
+            int y = edge == 0 ? y0 : y1 - 1;
+            int run = 0;
+            for (int x = x0; x <= x1; x++) {
+                bool on = x < x1 && paper[y * w + x];
+                if (on) {
+                    run++;
+                } else {
+                    flushHoriz(y, x, run);
+                    run = 0;
+                }
+            }
+        }
+        for (int edge = 0; edge < 2; edge++) {
+            int x = edge == 0 ? x0 : x1 - 1;
+            int run = 0;
+            for (int y = y0; y <= y1; y++) {
+                bool on = y < y1 && paper[y * w + x];
+                if (on) {
+                    run++;
+                } else {
+                    flushVert(x, y, run);
+                    run = 0;
+                }
+            }
+        }
+        for (int qi = 0; qi < qn; qi++) {
+            int idx = q[qi];
+            int x = idx % w;
+            int y = idx / w;
+            const int nx[4] = {x - 1, x + 1, x, x};
+            const int ny[4] = {y, y, y - 1, y + 1};
+            for (int k = 0; k < 4; k++) {
+                int xx = nx[k];
+                int yy = ny[k];
+                if (xx < x0 || xx >= x1 || yy < y0 || yy >= y1 || inFrame(xx, yy)) {
+                    continue;
+                }
+                int nidx = yy * w + xx;
+                if (!paper[nidx] || mask[nidx]) {
+                    continue;
+                }
+                mask[nidx] = 1;
+                q[qn++] = nidx;
+            }
+        }
+        free(q);
+        for (int y = y0; y < y1; y++) {
+            memset(paper + y * w + x0, 0, (size_t)(x1 - x0));
+        }
+    }
+    free(paper);
+    return mask;
+}
+
+static bool dm_pb_pixmap_has_picture_island(fz_context* ctx, fz_pixmap* pix) {
+    DmPbPhotoRect rect;
+    return dm_pb_collect_picture_islands(ctx, pix, &rect, 1) > 0;
+}
+
+// Keep chromatic picture islands in original colors. White that touches the
+// island border is the studio mat and is knocked out. A sealed ink frame blocks
+// that flood, so a drawing's interior stays. Text outside the island is restyled.
+static fz_pixmap* dm_pb_process_picture_islands(fz_context* ctx, fz_pixmap* src, const DarkModePalette& palette) {
+    DmPbPhotoRect rects[kDmPbMaxPhotoRects];
+    int nRects = dm_pb_collect_picture_islands(ctx, src, rects, kDmPbMaxPhotoRects);
+    if (nRects <= 0) {
+        return nullptr;
+    }
+    DmPbPhotoRect frame;
+    bool hasFrame = dm_pb_find_ink_frame(ctx, src, &frame);
+    fz_colorspace* cs = src->colorspace ? src->colorspace : fz_device_rgb(ctx);
+    fz_colorspace* rgb = fz_device_rgb(ctx);
+    int components = fz_colorspace_n(ctx, cs);
+    int n = src->n;
+    int w = src->w;
+    int h = src->h;
+    int stride = src->stride;
+    fz_pixmap* dst = fz_new_pixmap(ctx, cs, w, h, src->seps, src->alpha);
+    fz_copy_pixmap_rect(ctx, dst, src, fz_make_irect(0, 0, w, h), nullptr);
+    bool fastRgb = cs == rgb || fz_colorspace_is_rgb(ctx, cs);
+    bool fastGray = components == 1 || fz_colorspace_is_gray(ctx, cs);
+    u8* mat = dm_pb_build_island_mat_mask(ctx, src, cs, rgb, components, rects, nRects, hasFrame ? &frame : nullptr);
+    int br = (int)(palette.bgR * 255.f + 0.5f);
+    int bg = (int)(palette.bgG * 255.f + 0.5f);
+    int bb = (int)(palette.bgB * 255.f + 0.5f);
+    if (br < 0) {
+        br = 0;
+    }
+    if (br > 255) {
+        br = 255;
+    }
+    if (bg < 0) {
+        bg = 0;
+    }
+    if (bg > 255) {
+        bg = 255;
+    }
+    if (bb < 0) {
+        bb = 0;
+    }
+    if (bb > 255) {
+        bb = 255;
+    }
+    for (int y = 0; y < h; y++) {
+        unsigned char* row = dst->samples + y * stride;
+        for (int x = 0; x < w; x++) {
+            bool inIsland = dm_pb_point_in_photo_rects(x, y, rects, nRects);
+            bool sealed = hasFrame && x >= frame.x0 && x < frame.x1 && y >= frame.y0 && y < frame.y1;
+            if (mat && mat[y * w + x] && !sealed) {
+                unsigned char* px = row + x * n;
+                if (fastRgb) {
+                    px[0] = (unsigned char)br;
+                    px[1] = (unsigned char)bg;
+                    px[2] = (unsigned char)bb;
+                } else if (fastGray) {
+                    int v = (int)((0.2126f * palette.bgR + 0.7152f * palette.bgG + 0.0722f * palette.bgB) * 255.f +
+                                  0.5f);
+                    if (v < 0) {
+                        v = 0;
+                    }
+                    if (v > 255) {
+                        v = 255;
+                    }
+                    px[0] = (unsigned char)v;
+                } else {
+                    float outc[FZ_MAX_COLORS] = {palette.bgR, palette.bgG, palette.bgB};
+                    float back[FZ_MAX_COLORS] = {};
+                    fz_convert_color(ctx, rgb, outc, cs, back, cs, fz_default_color_params);
+                    for (int c = 0; c < components && c < FZ_MAX_COLORS; c++) {
+                        int v = (int)(back[c] * 255.f + 0.5f);
+                        if (v < 0) {
+                            v = 0;
+                        }
+                        if (v > 255) {
+                            v = 255;
+                        }
+                        px[c] = (unsigned char)v;
+                    }
+                }
+                continue;
+            }
+            if (inIsland || sealed) {
+                continue;
+            }
+            unsigned char* px = row + x * n;
+            float r, g, b;
+            if (fastRgb) {
+                r = px[0] / 255.f;
+                g = px[1] / 255.f;
+                b = px[2] / 255.f;
+            } else if (fastGray) {
+                r = g = b = px[0] / 255.f;
+            } else {
+                float conv[FZ_MAX_COLORS] = {};
+                float srcRgb[FZ_MAX_COLORS] = {};
+                for (int c = 0; c < components && c < FZ_MAX_COLORS; c++) {
+                    conv[c] = px[c] / 255.f;
+                }
+                fz_convert_color(ctx, cs, conv, rgb, srcRgb, cs, fz_default_color_params);
+                r = srcRgb[0];
+                g = srcRgb[1];
+                b = srcRgb[2];
+            }
+            float nr, ng, nb;
+            if (!ApplySharpDocumentInkPaper(r, g, b, palette, &nr, &ng, &nb)) {
+                continue;
+            }
+            if (fastRgb) {
+                int vr = (int)(nr * 255.f + 0.5f);
+                int vg = (int)(ng * 255.f + 0.5f);
+                int vb = (int)(nb * 255.f + 0.5f);
+                px[0] = (unsigned char)(vr < 0 ? 0 : (vr > 255 ? 255 : vr));
+                px[1] = (unsigned char)(vg < 0 ? 0 : (vg > 255 ? 255 : vg));
+                px[2] = (unsigned char)(vb < 0 ? 0 : (vb > 255 ? 255 : vb));
+            } else if (fastGray) {
+                float lum = 0.2126f * nr + 0.7152f * ng + 0.0722f * nb;
+                int v = (int)(lum * 255.f + 0.5f);
+                px[0] = (unsigned char)(v < 0 ? 0 : (v > 255 ? 255 : v));
+            } else {
+                float outc[FZ_MAX_COLORS] = {nr, ng, nb};
+                float back[FZ_MAX_COLORS] = {};
+                fz_convert_color(ctx, rgb, outc, cs, back, cs, fz_default_color_params);
+                for (int c = 0; c < components && c < FZ_MAX_COLORS; c++) {
+                    int v = (int)(back[c] * 255.f + 0.5f);
+                    if (v < 0) {
+                        v = 0;
+                    }
+                    if (v > 255) {
+                        v = 255;
+                    }
+                    px[c] = (unsigned char)v;
+                }
+            }
+        }
+    }
+    free(mat);
+    return dst;
+}
+
 fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, const DarkModePalette& palette,
                                               const DarkImageAnalysis* imgAnalysis) {
     if (!ctx || !src || !src->samples) {
@@ -2619,6 +3479,19 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
     int w = src->w;
     int h = src->h;
     int stride = src->stride;
+    struct V2FullPerf {
+        LARGE_INTEGER t;
+        int w;
+        int h;
+        const char* branch;
+        V2FullPerf(int ww, int hh) : t(TimeGet()), w(ww), h(hh), branch("pixel") {
+        }
+        ~V2FullPerf() {
+            if (PdfDarkModePagePerfOn()) {
+                logf("page-perf v2-full %dx%d branch=%s %.1f ms\n", w, h, branch, TimeSinceInMs(t));
+            }
+        }
+    } v2Perf(w, h);
 
     DmPbPageStats st = dm_pb_estimate_page_stats(ctx, src, cs, rgb, components);
     float paperRatio = st.paperRatio;
@@ -2626,11 +3499,30 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
     float chromaRatio = st.chromaRatio;
     float lumVar = st.lumVar;
     float redInkRatio = st.redInkRatio;
+    // Photo on a page: flood the white margin and keep the picture. Line-art and
+    // text-scan binarize below would flatten the photograph.
+    bool textPage = paperRatio >= 0.70f && satRatio < 0.08f && lumVar < 0.040f;
+    bool lineArtPage = satRatio < 0.06f && chromaRatio < 0.12f && paperRatio >= 0.45f && lumVar < 0.050f;
+    if (!textPage && !lineArtPage && lumVar >= 0.018f && paperRatio >= 0.08f) {
+        v2Perf.branch = "picturebook-early";
+        return PdfDarkModeProcessPictureBookPixmap(ctx, src, palette, imgAnalysis);
+    }
+    // Mostly-white text scans with a localized color drawing never reach the photo
+    // path above. Eyes or a small patch of color on a real photograph must not take
+    // this branch: only those boxes would stay original and the rest of the picture
+    // would be ink-remapped (white fox, snow).
+    fz_pixmap* island = dm_pb_process_picture_islands(ctx, src, palette);
+    if (island) {
+        v2Perf.branch = "islands";
+        return island;
+    }
+
     bool yellow = PdfDarkModeFullResStatsLookLikeAgedYellowLineArtPage(paperRatio, satRatio, chromaRatio, lumVar,
                                                                        st.borderPaperRatio, redInkRatio);
     bool officeScan =
         PdfDarkModeFullResStatsLookLikeOfficeScanForGovPaper(paperRatio, satRatio, chromaRatio, lumVar, redInkRatio);
     if (yellow) {
+        v2Perf.branch = "gov-yellow";
         DarkModePalette lineArtPalette = PdfDarkModeGovernmentPaperPalette(palette);
         return PdfDarkModeProcessGovernmentPaperPixmap(ctx, src, lineArtPalette);
     }
@@ -2640,7 +3532,8 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
     // sat/chroma; grayscale historical photos (Dust Bowl) use found photo islands.
     if (imgAnalysis && PdfDarkModeFeaturesLookLikeBwLineArtScan(imgAnalysis->features)) {
         bool insetPhoto = PdfDarkModeFullResStatsLookLikeInsetPhotoOnPaper(paperRatio, satRatio, chromaRatio, lumVar);
-        bool seekGray = dm_pb_should_seek_photo_rects(satRatio, chromaRatio, paperRatio, lumVar, imgAnalysis);
+        bool seekGray = dm_pb_should_seek_photo_rects(satRatio, chromaRatio, paperRatio, lumVar, st.borderPaperRatio,
+                                                     imgAnalysis);
         // Small colorful photo on a very white page (Jazz Greats TOC gold trumpet):
         // full-page sat/lumVar are crushed by the paper so every gate above fails and the
         // page fell to gov-paper binarize (red/ink stencil). Real 连环画 / text scans have
@@ -2668,9 +3561,11 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
         bool insetColor = seekColorInset && nPeek > 0 && largestCov >= 0.04f && largestCov <= 0.55f;
         bool colorArt = PdfDarkModeFullResStatsLookLikeColorIllustrationNotLineArt(satRatio, chromaRatio);
         if (!insetPhoto && !insetGray && !insetColor && !colorArt) {
+            v2Perf.branch = "gov-lineart";
             DarkModePalette lineArtPalette = PdfDarkModeGovernmentPaperPalette(palette);
             return PdfDarkModeProcessGovernmentPaperPixmap(ctx, src, lineArtPalette);
         }
+        v2Perf.branch = "picturebook-lineart";
         return PdfDarkModeProcessPictureBookPixmap(ctx, src, palette, imgAnalysis);
     }
 
@@ -2686,13 +3581,24 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
         textScanBinarize = false;
     }
     if (textScanBinarize) {
+        v2Perf.branch = "gov-text";
         DarkModePalette govPalette = PdfDarkModeGovernmentPaperPalette(palette);
         return PdfDarkModeProcessGovernmentPaperPixmap(ctx, src, govPalette);
     }
 
     if (officeScan) {
+        v2Perf.branch = "gov-office";
         DarkModePalette govPalette = PdfDarkModeGovernmentPaperPalette(palette);
         return PdfDarkModeProcessGovernmentPaperPixmap(ctx, src, govPalette);
+    }
+
+    // Full-bleed photos: show the original. A gray scene with a few colored
+    // subjects fails the high-sat full-bleed gate and was Okular-inverted.
+    if (PdfDarkModeV2ShouldKeepOriginalPhotograph(paperRatio, lumVar)) {
+        v2Perf.branch = "keep-original";
+        fz_pixmap* dst = fz_new_pixmap(ctx, cs, w, h, src->seps, src->alpha);
+        fz_copy_pixmap_rect(ctx, dst, src, fz_make_irect(0, 0, w, h), nullptr);
+        return dst;
     }
 
     // Warm cream / peach paper pages (RAZ Telescopes Galileo callouts, etc.): paper chroma
@@ -2701,6 +3607,7 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
     // Cap paper below 公文 scans (Hangzhou p.2–4: paper≥0.93, JPEG chroma, not cream).
     if (paperRatio >= 0.55f && paperRatio < 0.90f && satRatio < 0.04f && chromaRatio >= 0.12f && chromaRatio < 0.42f &&
         lumVar < 0.055f) {
+        v2Perf.branch = "softcream";
         return PdfDarkModeProcessSoftCreamPixmap(ctx, src, palette);
     }
 
@@ -2712,6 +3619,7 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
     // Paper-heavy RAZ text pages (Ella Fitzgerald): also PictureBook — Okular on JPEG
     // anti-aliased glyphs leaves hollow speckled outlines.
     if (satRatio >= 0.08f || (paperRatio >= 0.50f && satRatio < 0.15f && lumVar < 0.052f)) {
+        v2Perf.branch = "picturebook";
         return PdfDarkModeProcessPictureBookPixmap(ctx, src, palette, imgAnalysis);
     }
 
@@ -2722,7 +3630,7 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
     int nPhotoRects = 0;
     // Must pass analysis: B&W RAZ portraits with large white margins fail the null-analysis
     // paperRatio gates and otherwise get whole-page Okular invert (negative portraits).
-    if (dm_pb_should_seek_photo_rects(satRatio, chromaRatio, paperRatio, lumVar, imgAnalysis)) {
+    if (dm_pb_should_seek_photo_rects(satRatio, chromaRatio, paperRatio, lumVar, st.borderPaperRatio, imgAnalysis)) {
         nPhotoRects = dm_pb_find_photo_rects(ctx, src, photoRects, kDmPbMaxPhotoRects, lumPlane);
     }
 
@@ -2806,18 +3714,16 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
             if (!sparseBgOnly && dm_pb_rgb_is_photo_texture(r, g, b, lv)) {
                 continue;
             }
-            // Prefer steep ink/paper remap over Okular — cleaner JPEG text edges.
+            // Steep ink/paper for near-gray document pixels. Saturated pixels are
+            // photograph color — leave them. Okular here turned gray photos into
+            // red/blue false color.
             float nr = r, ng = g, nb = b;
             if (sparseBgOnly) {
                 nr = palette.bgR;
                 ng = palette.bgG;
                 nb = palette.bgB;
             } else if (!ApplySharpDocumentInkPaper(r, g, b, palette, &nr, &ng, &nb)) {
-                float mapped[3] = {};
-                MapRgbDarkModeV2(r, g, b, palette, mapped);
-                nr = mapped[0];
-                ng = mapped[1];
-                nb = mapped[2];
+                continue;
             }
             if (fastRgb) {
                 int vr = (int)(nr * 255.f + 0.5f);
@@ -2863,8 +3769,154 @@ static bool dm_v2_is_white_mat_paper_rgb(float r, float g, float b) {
     return (maxC - minC) < 0.10f && lum > 0.82f;
 }
 
+// Binary box dilate. tmp is w*h scratch.
+static void dm_v2_box_dilate(const u8* src, u8* dst, int w, int h, int rad, u8* tmp) {
+    int* pref = AllocArray<int>((size_t)w + 1);
+    if (!pref) {
+        memset(dst, 0, (size_t)w * h);
+        return;
+    }
+    for (int y = 0; y < h; y++) {
+        pref[0] = 0;
+        const u8* row = src + (size_t)y * w;
+        for (int x = 0; x < w; x++) {
+            pref[x + 1] = pref[x] + (row[x] ? 1 : 0);
+        }
+        u8* out = tmp + (size_t)y * w;
+        for (int x = 0; x < w; x++) {
+            int a = x - rad;
+            if (a < 0) {
+                a = 0;
+            }
+            int b = x + rad + 1;
+            if (b > w) {
+                b = w;
+            }
+            out[x] = (pref[b] - pref[a]) > 0 ? 1 : 0;
+        }
+    }
+    free(pref);
+    int* prefY = AllocArray<int>((size_t)h + 1);
+    if (!prefY) {
+        memset(dst, 0, (size_t)w * h);
+        return;
+    }
+    for (int x = 0; x < w; x++) {
+        prefY[0] = 0;
+        for (int y = 0; y < h; y++) {
+            prefY[y + 1] = prefY[y] + (tmp[(size_t)y * w + x] ? 1 : 0);
+        }
+        for (int y = 0; y < h; y++) {
+            int a = y - rad;
+            if (a < 0) {
+                a = 0;
+            }
+            int b = y + rad + 1;
+            if (b > h) {
+                b = h;
+            }
+            dst[(size_t)y * w + x] = (prefY[b] - prefY[a]) > 0 ? 1 : 0;
+        }
+    }
+    free(prefY);
+}
+
+static void dm_v2_box_erode(const u8* src, u8* dst, int w, int h, int rad, u8* tmp) {
+    int* pref = AllocArray<int>((size_t)w + 1);
+    if (!pref) {
+        memset(dst, 0, (size_t)w * h);
+        return;
+    }
+    for (int y = 0; y < h; y++) {
+        pref[0] = 0;
+        const u8* row = src + (size_t)y * w;
+        for (int x = 0; x < w; x++) {
+            pref[x + 1] = pref[x] + (row[x] ? 1 : 0);
+        }
+        u8* out = tmp + (size_t)y * w;
+        for (int x = 0; x < w; x++) {
+            int a = x - rad;
+            if (a < 0) {
+                a = 0;
+            }
+            int b = x + rad + 1;
+            if (b > w) {
+                b = w;
+            }
+            out[x] = (pref[b] - pref[a]) == (b - a) ? 1 : 0;
+        }
+    }
+    free(pref);
+    int* prefY = AllocArray<int>((size_t)h + 1);
+    if (!prefY) {
+        memset(dst, 0, (size_t)w * h);
+        return;
+    }
+    for (int x = 0; x < w; x++) {
+        prefY[0] = 0;
+        for (int y = 0; y < h; y++) {
+            prefY[y + 1] = prefY[y] + (tmp[(size_t)y * w + x] ? 1 : 0);
+        }
+        for (int y = 0; y < h; y++) {
+            int a = y - rad;
+            if (a < 0) {
+                a = 0;
+            }
+            int b = y + rad + 1;
+            if (b > h) {
+                b = h;
+            }
+            dst[(size_t)y * w + x] = (prefY[b] - prefY[a]) == (b - a) ? 1 : 0;
+        }
+    }
+    free(prefY);
+}
+
+// Grayscale cutouts (a zebra on white): light fur is not the mat. Close the
+// non-white subject so narrow white stripes stay inside, then only near-pure
+// white outside that silhouette can flood from the border.
+static void dm_v2_seal_gray_subject(u8* paper, int w, int h) {
+    int rad = (w < h ? w : h) / 60;
+    if (rad < 6) {
+        rad = 6;
+    }
+    if (rad > 10) {
+        rad = 10;
+    }
+    if (w < rad * 4 || h < rad * 4) {
+        return;
+    }
+    size_t n = (size_t)w * h;
+    u8* ink = AllocArray<u8>(n);
+    u8* tmp = AllocArray<u8>(n);
+    u8* dilated = AllocArray<u8>(n);
+    u8* closed = AllocArray<u8>(n);
+    if (!ink || !tmp || !dilated || !closed) {
+        free(ink);
+        free(tmp);
+        free(dilated);
+        free(closed);
+        return;
+    }
+    for (size_t i = 0; i < n; i++) {
+        ink[i] = paper[i] ? 0 : 1;
+    }
+    dm_v2_box_dilate(ink, dilated, w, h, rad, tmp);
+    dm_v2_box_erode(dilated, closed, w, h, rad, tmp);
+    for (size_t i = 0; i < n; i++) {
+        if (closed[i]) {
+            paper[i] = 0;
+        }
+    }
+    free(ink);
+    free(tmp);
+    free(dilated);
+    free(closed);
+}
+
 static u8* dm_v2_build_border_edge_white_mask(fz_context* ctx, fz_pixmap* pix, fz_colorspace* cs, fz_colorspace* rgb,
-                                              int components, int w, int h, int* outMasked, int* outPaperSides) {
+                                              int components, int w, int h, int* outMasked, int* outPaperSides,
+                                              bool sealGraySubject) {
     if (outMasked) {
         *outMasked = 0;
     }
@@ -2885,10 +3937,18 @@ static u8* dm_v2_build_border_edge_white_mask(fz_context* ctx, fz_pixmap* pix, f
         for (int x = 0; x < w; x++) {
             float r, g, b;
             dm_pb_sample_rgb(ctx, pix, cs, rgb, components, x, y, &r, &g, &b);
-            if (dm_v2_is_white_mat_paper_rgb(r, g, b)) {
+            float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+            float maxC = r > g ? (r > b ? r : b) : (g > b ? g : b);
+            float minC = r < g ? (r < b ? r : b) : (g < b ? g : b);
+            bool isPaper = sealGraySubject ? ((maxC - minC) < 0.08f && lum > 0.94f)
+                                           : dm_v2_is_white_mat_paper_rgb(r, g, b);
+            if (isPaper) {
                 paper[y * w + x] = 1;
             }
         }
+    }
+    if (sealGraySubject) {
+        dm_v2_seal_gray_subject(paper, w, h);
     }
 
     auto sidePaperRatio = [&](int x0, int y0, int x1, int y1) -> float {
@@ -3155,6 +4215,8 @@ fz_pixmap* PdfDarkModeProcessV2WhiteMatPixmap(fz_context* ctx, fz_pixmap* src, c
     }
 
     int paperSamples = 0, satHits = 0, chromaHits = 0, inkHits = 0;
+    float lumSum = 0.f;
+    float lumSq = 0.f;
     int estStepX = w > 48 ? w / 48 : 1;
     int estStepY = h > 48 ? h / 48 : 1;
     for (int y = 0; y < h; y += estStepY) {
@@ -3163,6 +4225,8 @@ fz_pixmap* PdfDarkModeProcessV2WhiteMatPixmap(fz_context* ctx, fz_pixmap* src, c
             dm_pb_sample_rgb(ctx, src, cs, rgb, components, x, y, &r, &g, &b);
             paperSamples++;
             float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+            lumSum += lum;
+            lumSq += lum * lum;
             float maxC = r > g ? (r > b ? r : b) : (g > b ? g : b);
             float minC = r < g ? (r < b ? r : b) : (g < b ? g : b);
             float chroma = maxC - minC;
@@ -3180,19 +4244,33 @@ fz_pixmap* PdfDarkModeProcessV2WhiteMatPixmap(fz_context* ctx, fz_pixmap* src, c
     float satRatio = paperSamples > 0 ? (float)satHits / (float)paperSamples : 0.f;
     float chromaRatio = paperSamples > 0 ? (float)chromaHits / (float)paperSamples : 0.f;
     float inkRatio = paperSamples > 0 ? (float)inkHits / (float)paperSamples : 0.f;
+    float meanLum = paperSamples > 0 ? lumSum / (float)paperSamples : 0.f;
+    float lumVar = paperSamples > 0 ? lumSq / (float)paperSamples - meanLum * meanLum : 0.f;
+    if (lumVar < 0.f) {
+        lumVar = 0.f;
+    }
+    // Grayscale animal on a white card (zebra). Flat text stays out: its luminance
+    // variance is much lower, and knocking out its paper would leave black glyphs.
+    bool grayCutout = satRatio < 0.08f && chromaRatio < 0.10f && inkRatio >= 0.04f && lumVar >= 0.05f;
     // Early out only when neither colorful badge nor light shadow-plate is plausible.
-    if (satRatio < 0.05f && chromaRatio < 0.08f && inkRatio >= 0.08f) {
+    if (!grayCutout && satRatio < 0.05f && chromaRatio < 0.08f && inkRatio >= 0.08f) {
         return nullptr;
     }
 
     int masked = 0;
     int paperSides = 0;
-    u8* edgeMask = dm_v2_build_border_edge_white_mask(ctx, src, cs, rgb, components, w, h, &masked, &paperSides);
+    u8* edgeMask = dm_v2_build_border_edge_white_mask(ctx, src, cs, rgb, components, w, h, &masked, &paperSides,
+                                                      grayCutout);
     if (!edgeMask) {
         return nullptr;
     }
     float edgeWhiteRatio = (w > 0 && h > 0) ? (float)masked / (float)(w * h) : 0.f;
-    if (!PdfDarkModeV2ShouldKnockOutWhiteMat(paperSides, edgeWhiteRatio, satRatio, chromaRatio, inkRatio)) {
+    bool knock = PdfDarkModeV2ShouldKnockOutWhiteMat(paperSides, edgeWhiteRatio, satRatio, chromaRatio, inkRatio);
+    // Wide mat around a grayscale subject. A thin rim (edgeWhite ~0.20) is a photo border, not a card.
+    if (!knock && grayCutout && paperSides >= 3 && edgeWhiteRatio >= 0.35f && edgeWhiteRatio <= 0.92f) {
+        knock = true;
+    }
+    if (!knock) {
         free(edgeMask);
         return nullptr;
     }

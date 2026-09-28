@@ -1,4 +1,4 @@
-﻿/* Copyright 2022 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2022 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "utils/BaseUtil.h"
@@ -894,20 +894,6 @@ static int GlyphIndexForDragEndpoint(TextSelection* ts, int pageNo, double x, do
     return g;
 }
 
-// Detects the first glyph of the next visual line when joined stext lines share
-// no zero-width separator glyph (e.g. CJK paragraph join in EngineMupdf): the
-// glyph is vertically separated from the current line band, unlike sub/superscripts
-// which overlap their base glyph substantially. Works for both top-aligned and
-// centered/indented lines where consecutive lines need not overlap in X.
-static bool GlyphJumpsToNextBandLine(const Rect& band, const Rect& c) {
-    if (band.dy <= 0 || c.dy <= 0) {
-        return false;
-    }
-    int yOverlap = std::min(band.y + band.dy, c.y + c.dy) - std::max(band.y, c.y);
-    int minDy = std::min(band.dy, c.dy);
-    return yOverlap * 10 < minDy * 3;
-}
-
 static void FillResultRects(TextSelection* ts, int pageNo, int glyph, int length, StrVec* lines = nullptr,
                             Vec<Rect>* lineBboxes = nullptr) {
     int len;
@@ -1296,12 +1282,16 @@ static void AppendCachedOcrParagraphLines(TextSelection* ts, int pageNo, int fro
     }
     int segStart = fromGlyph;
     for (int i = fromGlyph; i <= toGlyph; i++) {
-        bool isBreak = i < toGlyph && text[i] == '\n' && !coords[i].x && !coords[i].dx;
-        if (!isBreak) {
+        bool atEnd = i == toGlyph;
+        bool isBreak = !atEnd && text[i] == '\n' && !coords[i].x && !coords[i].dx;
+        if (!isBreak && !atEnd) {
             continue;
         }
-        if (i > segStart) {
-            lines.Append(ToUtf8Temp(text + segStart, i - segStart));
+        // A drag rarely includes the invisible paragraph-break glyph, so the
+        // tail after the last break (often the whole selection) must be kept.
+        int segEnd = isBreak ? i : toGlyph;
+        if (segEnd > segStart) {
+            lines.Append(ToUtf8Temp(text + segStart, segEnd - segStart));
         }
         segStart = i + 1;
     }

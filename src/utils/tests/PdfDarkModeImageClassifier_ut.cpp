@@ -697,8 +697,8 @@ void PdfDarkModeImageClassifier_UnitTests() {
     utassert(outR == 0.5f && outG == 0.5f && outB == 0.5f);
 
     PdfDarkModeCompressPhotoHighlights(1.f, 1.f, 1.f, &outR, &outG, &outB);
-    utassert(outR <= 0.91f && outG <= 0.91f && outB <= 0.91f);
-    utassert(outR > 0.82f);
+    utassert(outR < 0.70f && outG < 0.70f && outB < 0.70f);
+    utassert(outR > 0.55f);
 
     utassert(str::Eq(PdfDarkModeKindDebugLabel(DarkImageKind::Photo), "Photo"));
 

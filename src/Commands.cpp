@@ -295,6 +295,9 @@ static SeqStrings gCommandNames =
     "CmdToggleOcrDeskew\0"
     "CmdDisplayFilter\0"
     "CmdPdfTocApplyOffsetBelow\0"
+    "CmdSetDocumentImageDarkAuto\0"
+    "CmdSetDocumentImageDarkOriginal\0"
+    "CmdSetDocumentImageDarkTone\0"
     "CmdNone\0"
     "\0";
 
@@ -580,6 +583,9 @@ static i32 gCommandIds[] = {
     CmdToggleOcrDeskew,
     CmdDisplayFilter,
     CmdPdfTocApplyOffsetBelow,
+    CmdSetDocumentImageDarkAuto,
+    CmdSetDocumentImageDarkOriginal,
+    CmdSetDocumentImageDarkTone,
     CmdNone,
 };
 
@@ -859,12 +865,15 @@ SeqStrings gCommandDescriptions =
     "Toggle Auto-save After OCR\0"
     "Toggle Paragraph-merged Copy\0"
     "AI Recognize Table of Contents\0"
-    "Rotate PDF Pages...\0"
+    "Manually Adjust Pages...\0"
     "Deskew Page\0"
     "Deskew All Scanned Pages\0"
     "Toggle Deskew During OCR\0"
     "Enhance Display\0"
     "Apply This Page Offset Below\0"
+    "Images: Automatic\0"
+    "Images: Keep Original Colors\0"
+    "Images: Smart Invert\0"
     "Do nothing\0"
     "\0";
 // clang-format on
