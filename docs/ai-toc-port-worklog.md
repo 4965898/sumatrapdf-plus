@@ -30,3 +30,4 @@
 - 首次构建暴露上游生成脚本遗漏 `FileState.AutoOcrOn`：上游已生成头文件有该字段，脚本却没有。现已将字段写入生成脚本，重新生成头文件及设置文档，避免后续再次生成时丢失。
 - `bun ./cmd/build.ts --out-dir out/aitoc-upstream-preview` 构建通过：0 警告、0 错误；`test_util.exe` 通过全部 102290 项单元测试。融合版完整扫描 PDF 流程尚未再次实测。
 - 用户已确认自己是 autoContents 原版权人或已取得授权，允许这部分移植代码按 GPLv3 提交上游；源文件和使用文档已补充来源声明。PR 将如实说明融合版尚未重新走完整扫描 PDF 流程。
+- 上游草稿 PR [#93](https://github.com/dengxibo/sumatrapdf-plus/pull/93) 已创建：4965898:codex/upstream-sync-20260928 → dengxibo:main，初始融合提交 34bc027。GitHub 显示 22 个改动文件、可自动合并；创建时自动检查尚未返回。保留草稿状态，等待融合版完整 PDF 实测与上游评审。
