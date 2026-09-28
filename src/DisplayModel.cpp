@@ -2832,7 +2832,17 @@ bool DisplayModel::GoToPrevPage(int scrollY) {
 
     // scroll to the bottom of the page
     if (-1 == scrollY) {
-        scrollY = GetPageInfo(firstPageInNewRow)->pageOnScreen.dy;
+        PageInfo* prevInfo = GetPageInfo(firstPageInNewRow);
+        if (IsContinuous(GetDisplayMode())) {
+            // GoToPage adds scrollY to the page top. The full page height lands the
+            // view on the next page again, so fit-page wheel-up never left it.
+            scrollY = prevInfo->pos.dy - viewPort.dy + windowMargin.top + windowMargin.bottom;
+            if (scrollY < 0) {
+                scrollY = 0;
+            }
+        } else {
+            scrollY = prevInfo->pageOnScreen.dy;
+        }
     }
 
     GoToPage(firstPageInNewRow, scrollY);
