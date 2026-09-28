@@ -555,6 +555,16 @@ struct GlobalPrefs {
     char* extractPdfTocMode;
     // Ask AI provider: doubao (豆包), deepseek, or chatgpt
     char* aiChatProvider;
+    // AI table of contents API base URL
+    char* aiTocApiBaseUrl;
+    // AI table of contents API key
+    char* aiTocApiKey;
+    // AI table of contents model
+    char* aiTocApiModel;
+    // saved AI table of contents API profiles (JSON)
+    char* aiTocApiProfiles;
+    // maximum simultaneous AI table of contents requests (1-8)
+    int aiTocApiConcurrency;
     // deprecated: use AiChatProvider instead; if true and AiChatProvider
     // is not in settings, migrates to deepseek
     bool aiChatUseDeepSeekInsteadOfDoubao;
@@ -1043,8 +1053,8 @@ static const StructInfo gPointInfo = {sizeof(Point), 2, gPointFields, "X\0Y"};
 
 static const FieldInfo gGlobalPrefsFields[] = {
     {(size_t)-1, SettingType::Comment,
-     (intptr_t)"For documentation, see https://www.sumatrapdfreader.org/settings/settings3-7-31.html",
-     "For documentation, see https://www.sumatrapdfreader.org/settings/settings3-7-31.html"},
+     (intptr_t)"For documentation, see https://www.sumatrapdfreader.org/settings/settings3-7-32.html",
+     "For documentation, see https://www.sumatrapdfreader.org/settings/settings3-7-32.html"},
     {(size_t)-1, SettingType::Comment, 0, nullptr},
     {offsetof(GlobalPrefs, checkForUpdates), SettingType::Bool, true, "是否每天自动检测新版本"},
     {offsetof(GlobalPrefs, customScreenDPI), SettingType::Int, 0, "自定义主屏幕 DPI；0=跟随系统"},
@@ -1088,6 +1098,11 @@ static const FieldInfo gGlobalPrefsFields[] = {
      "智能提取目录详细程度 conservative/standard/detailed"},
     {offsetof(GlobalPrefs, aiChatProvider), SettingType::String, (intptr_t)"doubao",
      "Ask AI 提供商 doubao/deepseek/chatgpt"},
+    {offsetof(GlobalPrefs, aiTocApiBaseUrl), SettingType::String, (intptr_t)"", nullptr},
+    {offsetof(GlobalPrefs, aiTocApiKey), SettingType::String, (intptr_t)"", nullptr},
+    {offsetof(GlobalPrefs, aiTocApiModel), SettingType::String, (intptr_t)"", nullptr},
+    {offsetof(GlobalPrefs, aiTocApiProfiles), SettingType::String, (intptr_t)"", nullptr},
+    {offsetof(GlobalPrefs, aiTocApiConcurrency), SettingType::Int, 4, nullptr},
     {offsetof(GlobalPrefs, aiChatUseDeepSeekInsteadOfDoubao), SettingType::Bool, false, "已弃用，请用 AiChatProvider"},
     {offsetof(GlobalPrefs, enableAskAI), SettingType::Bool, true, "显示 Ask AI 入口"},
     {offsetof(GlobalPrefs, showFavorites), SettingType::Bool, false, "默认显示收藏侧边栏"},
@@ -1184,23 +1199,23 @@ static const FieldInfo gGlobalPrefsFields[] = {
      "Settings below are not recognized by the current version"},
 };
 static const StructInfo gGlobalPrefsInfo = {
-    sizeof(GlobalPrefs), 123, gGlobalPrefsFields,
+    sizeof(GlobalPrefs), 128, gGlobalPrefsFields,
     "\0\0CheckForUpdates\0CustomScreenDPI\0DefaultDisplayMode\0DefaultZoom\0EnableTeXEnhancements\0EscToExit\0FullPathI"
     "nTitle\0InverseSearchCmdLine\0LazyLoading\0MainWindowBackground\0NoHomeTab\0HomePageSortByFrequentlyRead\0HomePage"
     "ViewMode\0HomePageThumbnailDx\0ReloadModifiedDocuments\0RememberOpenedFiles\0RememberStatePerDocument\0RestoreSess"
     "ion\0ReuseInstance\0ShowMenubar\0ShowMenubarWithTabs\0ShowTips\0CustomColors\0ShowToolbar\0ShowAnnotToolbarButtons"
     "\0SearchUIFloating\0OfflineDictionaryPath\0EnableDoubleClickWordLookup\0AutoOcrScanPages\0OcrAutoSave\0OcrDeskew\0"
-    "OcrFullDocumentMode\0OcrCopyMerged\0ExtractPdfTocMode\0AiChatProvider\0AiChatUseDeepSeekInsteadOfDoubao\0EnableAsk"
-    "AI\0ShowFavorites\0ShowToc\0ShowLinks\0ShowStartPage\0SidebarDx\0Scrollbars\0ScrollbarInSinglePage\0SmoothScroll\0"
-    "FastScrollOverScrollbar\0PreventSleepInFullscreen\0TabWidth\0TabFontSize\0TabBarHeight\0Theme\0LastDarkTheme\0Last"
-    "LightTheme\0DocumentColorMode\0TocDy\0ToolbarSize\0TreeFontName\0TreeFontSize\0TreeWrapLabels\0UIFontSize\0Disable"
-    "AntiAlias\0EngineeringDrawingEnhance\0UseSysColors\0UseTabs\0TabsMru\0ZoomLevels\0ZoomIncrement\0\0FixedPageUI\0\0"
-    "EBookUI\0\0ComicBookUI\0\0ImageUI\0\0ChmUI\0\0Annotations\0\0ExternalViewers\0\0ForwardSearch\0\0PrinterDefaults\0"
-    "\0Fullscreen\0\0SelectionHandlers\0\0Shortcuts\0\0Themes\0\0TabGroups\0\0ReadAloudVoiceId\0ReadAloudSpeakingRate\0"
-    "ReadAloudSpeakingRateZh\0ReadAloudSpeakingRateEn\0ReadAloudSmartVoiceZh\0ReadAloudSmartVoiceEn\0ReadAloudSmartOnli"
-    "neVoiceZh\0ReadAloudSmartOnlineVoiceEn\0\0\0DefaultPasswords\0UiLanguage\0VersionToSkip\0WindowState\0WindowPos\0S"
-    "earchUIWindowPos\0FileStates\0SessionData\0ReopenOnce\0TimeOfLastUpdateCheck\0TimeOfUpdateCheckSnooze\0OpenCountWe"
-    "ek\0PropWinPos\0\0"};
+    "OcrFullDocumentMode\0OcrCopyMerged\0ExtractPdfTocMode\0AiChatProvider\0AiTocApiBaseUrl\0AiTocApiKey\0AiTocApiModel"
+    "\0AiTocApiProfiles\0AiTocApiConcurrency\0AiChatUseDeepSeekInsteadOfDoubao\0EnableAskAI\0ShowFavorites\0ShowToc\0Sh"
+    "owLinks\0ShowStartPage\0SidebarDx\0Scrollbars\0ScrollbarInSinglePage\0SmoothScroll\0FastScrollOverScrollbar\0Preve"
+    "ntSleepInFullscreen\0TabWidth\0TabFontSize\0TabBarHeight\0Theme\0LastDarkTheme\0LastLightTheme\0DocumentColorMode"
+    "\0TocDy\0ToolbarSize\0TreeFontName\0TreeFontSize\0TreeWrapLabels\0UIFontSize\0DisableAntiAlias\0EngineeringDrawing"
+    "Enhance\0UseSysColors\0UseTabs\0TabsMru\0ZoomLevels\0ZoomIncrement\0\0FixedPageUI\0\0EBookUI\0\0ComicBookUI\0\0Ima"
+    "geUI\0\0ChmUI\0\0Annotations\0\0ExternalViewers\0\0ForwardSearch\0\0PrinterDefaults\0\0Fullscreen\0\0SelectionHand"
+    "lers\0\0Shortcuts\0\0Themes\0\0TabGroups\0\0ReadAloudVoiceId\0ReadAloudSpeakingRate\0ReadAloudSpeakingRateZh\0Read"
+    "AloudSpeakingRateEn\0ReadAloudSmartVoiceZh\0ReadAloudSmartVoiceEn\0ReadAloudSmartOnlineVoiceZh\0ReadAloudSmartOnli"
+    "neVoiceEn\0\0\0DefaultPasswords\0UiLanguage\0VersionToSkip\0WindowState\0WindowPos\0SearchUIWindowPos\0FileStates"
+    "\0SessionData\0ReopenOnce\0TimeOfLastUpdateCheck\0TimeOfUpdateCheckSnooze\0OpenCountWeek\0PropWinPos\0\0"};
 static const FieldInfo gTheme_1_Fields[] = {
     {offsetof(Theme, name), SettingType::String, (intptr_t)"", "主题名称"},
     {offsetof(Theme, textColor), SettingType::Color, (intptr_t)"", "文字颜色"},

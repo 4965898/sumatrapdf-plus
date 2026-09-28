@@ -969,6 +969,11 @@ const globalPrefs: Field[] = [
     ),
     "Valid values: doubao, deepseek, chatgpt",
   ),
+  mkField("AiTocApiBaseUrl", Str, "", "AI table of contents API base URL"),
+  mkField("AiTocApiKey", Str, "", "AI table of contents API key"),
+  mkField("AiTocApiModel", Str, "", "AI table of contents model"),
+  mkField("AiTocApiProfiles", Str, "", "saved AI table of contents API profiles (JSON)"),
+  mkField("AiTocApiConcurrency", Int, 4, "maximum simultaneous AI table of contents requests (1-8)"),
   setVersion(
     mkField(
       "AiChatUseDeepSeekInsteadOfDoubao",

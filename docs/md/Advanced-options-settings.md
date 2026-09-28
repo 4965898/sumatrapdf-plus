@@ -162,6 +162,21 @@ ExtractPdfTocMode = standard
 ; Valid values: doubao, deepseek, chatgpt (introduced in version 3.7)
 AiChatProvider = doubao
 
+; AI table of contents API base URL
+AiTocApiBaseUrl =
+
+; AI table of contents API key
+AiTocApiKey =
+
+; AI table of contents model
+AiTocApiModel =
+
+; saved AI table of contents API profiles (JSON)
+AiTocApiProfiles =
+
+; maximum simultaneous AI table of contents requests (1-8)
+AiTocApiConcurrency = 4
+
 ; deprecated: use AiChatProvider instead; if true and AiChatProvider is not in
 ; settings, migrates to deepseek (introduced in version 3.7)
 AiChatUseDeepSeekInsteadOfDoubao = false
@@ -825,4 +840,3 @@ The components are hex values (ranging from 00 to FF) and stand for:
 - `bb` : blue component
 
 For example #ff0000 means red color. #7fff0000 is half-transparent red.
-
