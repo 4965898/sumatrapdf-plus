@@ -236,6 +236,20 @@ export function copyOcrSidecar(outDir: string): void {
     }
     copyFileNormalized(join(dst, name), join(src, name));
   }
+  // Face paste models live in ocr/face/ next to the exe (FaceLandmarkEngine).
+  const faceSrc = join(src, "face");
+  if (!existsSync(faceSrc)) {
+    return;
+  }
+  const faceDst = join(dst, "face");
+  mkdirSync(faceDst, { recursive: true });
+  for (const name of readdirSync(faceSrc)) {
+    const ext = extname(name).toLowerCase();
+    if (!keep.has(ext)) {
+      continue;
+    }
+    copyFileNormalized(join(faceDst, name), join(faceSrc, name));
+  }
 }
 
 export function copyOpenccData(outDir: string): void {
