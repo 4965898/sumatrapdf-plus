@@ -708,13 +708,12 @@ static float LoopWidth(const DetectedFace& face, const int* idx, int nIdx) {
 }
 
 static bool FaceOvalUsable(const DetectedFace& face, int w, int h) {
-    // Presence can be low on profile / looking-down heads; the mesh points may
-    // still span a real face. Reject only empty or tiny / off-image loops.
+    if (face.presenceScore < 0.5f) {
+        return false;
+    }
     int outside = 0;
     float minX = 1e9f;
     float maxX = -1e9f;
-    float minY = 1e9f;
-    float maxY = -1e9f;
     for (int i = 0; i < kFaceOvalCount; i++) {
         float x = face.landmarks[kFaceOvalContour[i]].x;
         float y = face.landmarks[kFaceOvalContour[i]].y;
@@ -724,77 +723,20 @@ static bool FaceOvalUsable(const DetectedFace& face, int w, int h) {
         if (x > maxX) {
             maxX = x;
         }
-        if (y < minY) {
-            minY = y;
-        }
-        if (y > maxY) {
-            maxY = y;
-        }
         if (x < -8.f || y < -8.f || x > (float)w + 8.f || y > (float)h + 8.f) {
             outside++;
         }
     }
     float fw = maxX - minX;
-    float fh = maxY - minY;
-    if (fw < 22.f || fh < 22.f) {
+    // A face in a group photo can be a small slice of the frame. Skip only
+    // boxes too small to cover eyes and a mouth.
+    if (fw < 22.f) {
         return false;
     }
     if (outside > kFaceOvalCount / 3) {
         return false;
     }
     return true;
-}
-
-static void FillPaddedLandmarkBounds(float* mask, int w, int h, const DetectedFace& face, const int* idx, int nIdx,
-                                     float padFrac) {
-    if (nIdx < 3) {
-        return;
-    }
-    float minX = 1e9f, maxX = -1e9f, minY = 1e9f, maxY = -1e9f;
-    for (int i = 0; i < nIdx; i++) {
-        float x = face.landmarks[idx[i]].x;
-        float y = face.landmarks[idx[i]].y;
-        if (x < minX) {
-            minX = x;
-        }
-        if (x > maxX) {
-            maxX = x;
-        }
-        if (y < minY) {
-            minY = y;
-        }
-        if (y > maxY) {
-            maxY = y;
-        }
-    }
-    float dx = maxX - minX;
-    float dy = maxY - minY;
-    if (dx < 8.f || dy < 8.f) {
-        return;
-    }
-    float padX = dx * padFrac;
-    float padY = dy * padFrac;
-    int x0 = (int)floorf(minX - padX);
-    int y0 = (int)floorf(minY - padY);
-    int x1 = (int)ceilf(maxX + padX);
-    int y1 = (int)ceilf(maxY + padY);
-    if (x0 < 0) {
-        x0 = 0;
-    }
-    if (y0 < 0) {
-        y0 = 0;
-    }
-    if (x1 >= w) {
-        x1 = w - 1;
-    }
-    if (y1 >= h) {
-        y1 = h - 1;
-    }
-    for (int y = y0; y <= y1; y++) {
-        for (int x = x0; x <= x1; x++) {
-            mask[(size_t)y * (size_t)w + (size_t)x] = 1.f;
-        }
-    }
 }
 
 static void FillFaceEllipse(float* mask, int w, int h, float cx, float cy, float rx, float ry) {
@@ -1276,28 +1218,8 @@ static void BuildFaceBlendWeight(const u8* rgb, int w, int h, int stride, const 
             }
             int bgR = 0, bgG = 0, bgB = 0;
             bool flatBg = SideBackdropIsFlat(rgb, stride, w, h, minX, minY, maxX, maxY, &bgR, &bgG, &bgB);
-            // Whole face: padded bounds of oval + eyes + brows, then hull and
-            // apertures on top. A tight oval hull alone left eyes and cheeks out.
-            int facePts[kFaceOvalCount + kNoseSilhouetteCount + 2 * kEyeContourCount + 2 * kBrowContourCount];
-            int nFacePts = 0;
-            for (int i = 0; i < kFaceOvalCount; i++) {
-                facePts[nFacePts++] = kFaceOvalContour[i];
-            }
-            for (int i = 0; i < kNoseSilhouetteCount; i++) {
-                facePts[nFacePts++] = kNoseSilhouette[i];
-            }
-            for (int i = 0; i < kEyeContourCount; i++) {
-                facePts[nFacePts++] = kLeftEyeContour[i];
-                facePts[nFacePts++] = kRightEyeContour[i];
-            }
-            for (int i = 0; i < kBrowContourCount; i++) {
-                facePts[nFacePts++] = kLeftBrowContour[i];
-                facePts[nFacePts++] = kRightBrowContour[i];
-            }
-            FillPaddedLandmarkBounds(layer, w, h, face, facePts, nFacePts, flatBg ? 0.08f : 0.22f);
-            float boxCx = face.bbox.x + face.bbox.dx * 0.5f;
-            float boxCy = face.bbox.y + face.bbox.dy * 0.46f;
-            FillFaceEllipse(layer, w, h, boxCx, boxCy, face.bbox.dx * 0.62f, face.bbox.dy * 0.70f);
+            // Convex hull of face oval + nose silhouette (bridge / tip / alae).
+            // A pure oval leaves the nose tip and outer alae short of paste coverage.
             int silhouette[kFaceOvalCount + kNoseSilhouetteCount];
             int nSil = 0;
             for (int i = 0; i < kFaceOvalCount; i++) {
@@ -1306,11 +1228,7 @@ static void BuildFaceBlendWeight(const u8* rgb, int w, int h, int stride, const 
             for (int i = 0; i < kNoseSilhouetteCount; i++) {
                 silhouette[nSil++] = kNoseSilhouette[i];
             }
-            FillConvexLandmarkLoop(layer, w, h, face, silhouette, nSil, flatBg ? 1.0f : 1.12f);
-            FillLandmarkLoop(layer, w, h, face, kLeftEyeContour, kEyeContourCount, 1.45f);
-            FillLandmarkLoop(layer, w, h, face, kRightEyeContour, kEyeContourCount, 1.45f);
-            FillLandmarkLoop(layer, w, h, face, kLeftBrowContour, kBrowContourCount, 1.35f);
-            FillLandmarkLoop(layer, w, h, face, kRightBrowContour, kBrowContourCount, 1.35f);
+            FillConvexLandmarkLoop(layer, w, h, face, silhouette, nSil, flatBg ? 1.0f : 1.08f);
             int feather = (int)(faceW * 0.10f);
             if (flatBg) {
                 // A wide feather on a flat backdrop paints a pale ring once that backdrop goes dark.
@@ -1660,8 +1578,8 @@ static bool TonePerfOn() {
     return on == 1;
 }
 
-bool PdfDarkModeToneThemeVariant(unsigned char* samples, int w, int h, int n, int stride, const DarkModePalette& palette,
-                                 int variant) {
+bool PdfDarkModeToneThemeVariant(unsigned char* samples, int w, int h, int n, int stride,
+                                 const DarkModePalette& palette, int variant) {
     if (!samples || w < 8 || h < 8 || n < 3 || stride < w * n) {
         return false;
     }

@@ -867,9 +867,7 @@ bool FaceLandmarkEngine::Detect(const u8* rgb, int width, int height, int stride
         face.bbox = RectF(x1, y1, bw, bh);
         face.detectScore = kept[fi].score;
         face.presenceScore = presence;
-        // Profile and looking-down heads often score presence < 0.5 while the
-        // mesh points are still good. Keep them so the paste can cover eyes.
-        {
+        if (presence >= 0.5f) {
             float zScale = side / (float)meshSize;
             for (int li = 0; li < kFaceLandmarkCount; li++) {
                 float lx = meshOuts[lmSlot][li * 3];

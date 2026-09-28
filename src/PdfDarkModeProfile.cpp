@@ -97,7 +97,7 @@ u32 PdfDarkModeComputeProfileHash(const DarkModeProfile* profile) {
     h = mix(h, ThemeUsesEyeCareChrome() ? 1 : 0);
     // Bump when FollowThemeV2 page-image algorithm changes (invalidates tile/image caches).
     if (profile->mode == PageColorMode::FollowThemeV2) {
-        h = mix(h, 75u); // 75 = face paste uses padded landmark bounds, not only the oval hull
+        h = mix(h, 72u); // face paste: oval+nose silhouette convex hull (scale 1.08)
     }
     return h;
 }
