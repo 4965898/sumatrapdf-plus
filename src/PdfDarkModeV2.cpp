@@ -6,6 +6,8 @@ extern "C" {
 }
 
 #include "utils/BaseUtil.h"
+#include "utils/Log.h"
+#include "utils/Timer.h"
 
 #include "PdfDarkModeInternal.h"
 #include "PdfDarkModeV2.h"
@@ -21,17 +23,83 @@ typedef struct {
     RectF pageBounds;
     DarkModeEngineCache* engineCache;
     u32 profileHash;
+    fz_rect clipStack[24];
+    int clipTop;
+    int clipExtra;
 } pdf_dark_mode_v2_device;
 
+static void v2_push_clip(pdf_dark_mode_v2_device* d, fz_rect scissor) {
+    fz_rect next = fz_intersect_rect(d->clipStack[d->clipTop], scissor);
+    if (d->clipTop + 1 < 24) {
+        d->clipTop++;
+        d->clipStack[d->clipTop] = next;
+    } else {
+        d->clipExtra++;
+    }
+}
+
+static void v2_pop_clip_rect(pdf_dark_mode_v2_device* d) {
+    if (d->clipExtra > 0) {
+        d->clipExtra--;
+    } else if (d->clipTop > 0) {
+        d->clipTop--;
+    }
+}
+
+struct V2PerfCounters {
+    int mapCalls = 0;
+    int textCalls = 0;
+    int pathCalls = 0;
+    int groupCalls = 0;
+    double mapMs = 0;
+    double textMs = 0;
+    double pathMs = 0;
+};
+
+static V2PerfCounters gV2Perf;
+
+void PdfDarkModeV2FlushPerfLog() {
+    if (!PdfDarkModePagePerfOn()) {
+        return;
+    }
+    logf("page-perf v2-ops text=%d path=%d map=%d mapMs=%.1f textMs=%.1f pathMs=%.1f groups=%d\n", gV2Perf.textCalls,
+         gV2Perf.pathCalls, gV2Perf.mapCalls, gV2Perf.mapMs, gV2Perf.textMs, gV2Perf.pathMs, gV2Perf.groupCalls);
+    gV2Perf = {};
+}
+
+// Yellow highlight rules are light and saturated. Okular invert leaves that yellow
+// in place, then black text becomes light and disappears on it.
+static bool v2_is_light_marker(float r, float g, float b) {
+    float maxC = r > g ? (r > b ? r : b) : (g > b ? g : b);
+    float minC = r < g ? (r < b ? r : b) : (g < b ? g : b);
+    float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+    return lum > 0.62f && (maxC - minC) > 0.18f;
+}
+
 // Map paint for paths/text; neutralize soft drop shadows that would become white fringes.
+// marker: fills and strokes. Light highlight colors are parked darker. Text stays
+// on the ordinary invert so black glyphs become light.
 static void v2_map_paint(fz_context* ctx, pdf_dark_mode_v2_device* d, fz_colorspace* cs, const float* color,
-                         float alpha, fz_color_params colorParams, float* mapped) {
+                         float alpha, fz_color_params colorParams, float* mapped, bool marker) {
+    bool perf = PdfDarkModePagePerfOn();
+    LARGE_INTEGER mapStart = {};
+    if (perf) {
+        gV2Perf.mapCalls++;
+        mapStart = TimeGet();
+    }
     float rgb[FZ_MAX_COLORS] = {};
     fz_convert_color(ctx, cs, color, fz_device_rgb(ctx), rgb, cs, colorParams);
+    if (perf) {
+        gV2Perf.mapMs += TimeSinceInMs(mapStart);
+    }
     if (PdfDarkModeV2IsSoftShadowPaint(rgb[0], rgb[1], rgb[2], alpha)) {
         mapped[0] = d->palette->bgR;
         mapped[1] = d->palette->bgG;
         mapped[2] = d->palette->bgB;
+        return;
+    }
+    if (marker && v2_is_light_marker(rgb[0], rgb[1], rgb[2])) {
+        MapRgbLightMarkerToDarkTheme(rgb[0], rgb[1], rgb[2], *d->palette, mapped);
         return;
     }
     MapRgbDarkModeV2(rgb[0], rgb[1], rgb[2], *d->palette, mapped);
@@ -382,11 +450,16 @@ static fz_image* v2_build_page_image(fz_context* ctx, fz_image* srcImage, const 
     if (outDownsampled) {
         *outDownsampled = false;
     }
+    LARGE_INTEGER pageImageStart = TimeGet();
+    double analyzeMs = 0;
+    double decodeMs = 0;
     fz_try(ctx) {
         // Thumbnail classify first. Office/text scans can remap at view size;
         // native 1–6MP decode+float remap is why dark-mode 公文 shows
         // "Please wait - rendering..." while light theme stays snappy.
+        LARGE_INTEGER a0 = TimeGet();
         DarkImageAnalysis analysis = PdfDarkModeAnalyzeImage(ctx, srcImage, 0.97f, true);
+        analyzeMs = TimeSinceInMs(a0);
         int w = srcImage->w;
         int h = srcImage->h;
         int maxDim = kV2MaxDecodeDim;
@@ -406,6 +479,7 @@ static fz_image* v2_build_page_image(fz_context* ctx, fz_image* srcImage, const 
                 }
             }
         }
+        LARGE_INTEGER d0 = TimeGet();
         if (w > 0 && h > 0 && (w > maxDim || h > maxDim)) {
             float s = (float)maxDim / (float)(w > h ? w : h);
             fz_matrix scale = fz_scale(s, s);
@@ -413,6 +487,7 @@ static fz_image* v2_build_page_image(fz_context* ctx, fz_image* srcImage, const 
         } else {
             src = fz_get_pixmap_from_image(ctx, srcImage, nullptr, nullptr, nullptr, nullptr);
         }
+        decodeMs = TimeSinceInMs(d0);
         // A gray destination cannot represent a chromatic theme background. Promote
         // before remapping so Dracula and similar palettes retain their exact tint.
         if (src && src->colorspace && fz_colorspace_is_gray(ctx, src->colorspace)) {
@@ -431,6 +506,11 @@ static fz_image* v2_build_page_image(fz_context* ctx, fz_image* srcImage, const 
                 v2_transform_pixmap(ctx, dst, palette);
             }
             result = fz_new_image_from_pixmap(ctx, dst, nullptr);
+        }
+        if (PdfDarkModePagePerfOn()) {
+            logf("page-perf page-image src=%dx%d out=%dx%d maxDim=%d analyze=%.1f decode=%.1f total=%.1f ms\n",
+                 srcImage->w, srcImage->h, src ? src->w : 0, src ? src->h : 0, maxDim, analyzeMs, decodeMs,
+                 TimeSinceInMs(pageImageStart));
         }
     }
     fz_always(ctx) {
@@ -547,9 +627,18 @@ static void v2_drop(fz_context* ctx, fz_device* dev) {
 static void v2_fill_path(fz_context* ctx, fz_device* dev, const fz_path* path, int even_odd, fz_matrix ctm,
                          fz_colorspace* colorspace, const float* color, float alpha, fz_color_params color_params) {
     pdf_dark_mode_v2_device* d = (pdf_dark_mode_v2_device*)dev;
+    bool perf = PdfDarkModePagePerfOn();
+    LARGE_INTEGER opStart = {};
+    if (perf) {
+        gV2Perf.pathCalls++;
+        opStart = TimeGet();
+    }
     float mapped[FZ_MAX_COLORS] = {};
-    v2_map_paint(ctx, d, colorspace, color, alpha, color_params, mapped);
+    v2_map_paint(ctx, d, colorspace, color, alpha, color_params, mapped, true);
     fz_fill_path(ctx, d->inner, path, even_odd, ctm, fz_device_rgb(ctx), mapped, alpha, color_params);
+    if (perf) {
+        gV2Perf.pathMs += TimeSinceInMs(opStart);
+    }
 }
 
 static void v2_stroke_path(fz_context* ctx, fz_device* dev, const fz_path* path, const fz_stroke_state* stroke,
@@ -557,16 +646,25 @@ static void v2_stroke_path(fz_context* ctx, fz_device* dev, const fz_path* path,
                            fz_color_params color_params) {
     pdf_dark_mode_v2_device* d = (pdf_dark_mode_v2_device*)dev;
     float mapped[FZ_MAX_COLORS] = {};
-    v2_map_paint(ctx, d, colorspace, color, alpha, color_params, mapped);
+    v2_map_paint(ctx, d, colorspace, color, alpha, color_params, mapped, true);
     fz_stroke_path(ctx, d->inner, path, stroke, ctm, fz_device_rgb(ctx), mapped, alpha, color_params);
 }
 
 static void v2_fill_text(fz_context* ctx, fz_device* dev, const fz_text* text, fz_matrix ctm, fz_colorspace* colorspace,
                          const float* color, float alpha, fz_color_params color_params) {
     pdf_dark_mode_v2_device* d = (pdf_dark_mode_v2_device*)dev;
+    bool perf = PdfDarkModePagePerfOn();
+    LARGE_INTEGER opStart = {};
+    if (perf) {
+        gV2Perf.textCalls++;
+        opStart = TimeGet();
+    }
     float mapped[FZ_MAX_COLORS] = {};
-    v2_map_paint(ctx, d, colorspace, color, alpha, color_params, mapped);
+    v2_map_paint(ctx, d, colorspace, color, alpha, color_params, mapped, false);
     fz_fill_text(ctx, d->inner, text, ctm, fz_device_rgb(ctx), mapped, alpha, color_params);
+    if (perf) {
+        gV2Perf.textMs += TimeSinceInMs(opStart);
+    }
 }
 
 static void v2_stroke_text(fz_context* ctx, fz_device* dev, const fz_text* text, const fz_stroke_state* stroke,
@@ -574,14 +672,156 @@ static void v2_stroke_text(fz_context* ctx, fz_device* dev, const fz_text* text,
                            fz_color_params color_params) {
     pdf_dark_mode_v2_device* d = (pdf_dark_mode_v2_device*)dev;
     float mapped[FZ_MAX_COLORS] = {};
-    v2_map_paint(ctx, d, colorspace, color, alpha, color_params, mapped);
+    v2_map_paint(ctx, d, colorspace, color, alpha, color_params, mapped, false);
     fz_stroke_text(ctx, d->inner, text, stroke, ctm, fz_device_rgb(ctx), mapped, alpha, color_params);
 }
 
+static void v2_recolor_shade_pixmap(fz_pixmap* pix, const DarkModePalette& palette) {
+    if (!pix || !pix->samples || pix->n < 3) {
+        return;
+    }
+    int n = pix->n;
+    int samples = 0;
+    int shadowish = 0;
+    int stepX = pix->w / 8;
+    int stepY = pix->h / 8;
+    if (stepX < 1) {
+        stepX = 1;
+    }
+    if (stepY < 1) {
+        stepY = 1;
+    }
+    for (int y = 0; y < pix->h; y += stepY) {
+        unsigned char* row = pix->samples + (size_t)y * pix->stride;
+        for (int x = 0; x < pix->w; x += stepX) {
+            unsigned char* px = row + (size_t)x * n;
+            float r = px[0] / 255.f;
+            float g = px[1] / 255.f;
+            float b = px[2] / 255.f;
+            float maxC = r > g ? (r > b ? r : b) : (g > b ? g : b);
+            float minC = r < g ? (r < b ? r : b) : (g < b ? g : b);
+            float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+            if (maxC - minC < 0.08f && lum < 0.45f) {
+                shadowish++;
+            }
+            samples++;
+        }
+    }
+    // A dark neutral shade is a drop shadow. Inverting it paints a light fringe.
+    bool shadow = samples > 0 && shadowish * 10 >= samples * 7;
+    for (int y = 0; y < pix->h; y++) {
+        unsigned char* row = pix->samples + (size_t)y * pix->stride;
+        for (int x = 0; x < pix->w; x++) {
+            unsigned char* px = row + (size_t)x * n;
+            float mapped[3];
+            if (shadow) {
+                mapped[0] = palette.bgR;
+                mapped[1] = palette.bgG;
+                mapped[2] = palette.bgB;
+            } else {
+                // Okular invert leaves pure yellow / cyan / magenta where they are
+                // (lightness stays ~0.5). A callout gradient is a background: reseat
+                // lightness the same way as smart-invert pictures.
+                MapRgbToDarkThemeOklab(px[0] / 255.f, px[1] / 255.f, px[2] / 255.f, palette, mapped);
+            }
+            int vr = (int)(mapped[0] * 255.f + 0.5f);
+            int vg = (int)(mapped[1] * 255.f + 0.5f);
+            int vb = (int)(mapped[2] * 255.f + 0.5f);
+            px[0] = (unsigned char)(vr < 0 ? 0 : (vr > 255 ? 255 : vr));
+            px[1] = (unsigned char)(vg < 0 ? 0 : (vg > 255 ? 255 : vg));
+            px[2] = (unsigned char)(vb < 0 ? 0 : (vb > 255 ? 255 : vb));
+        }
+    }
+}
+
+// Gradients are not path fills. Leaving them alone keeps a bright swoosh on a
+// dark page (the yellow reading-guide oval) while the book image beside it inverts.
 static void v2_fill_shade(fz_context* ctx, fz_device* dev, fz_shade* shd, fz_matrix ctm, float alpha,
                           fz_color_params color_params) {
     pdf_dark_mode_v2_device* d = (pdf_dark_mode_v2_device*)dev;
-    fz_fill_shade(ctx, d->inner, shd, ctm, alpha, color_params);
+    if (!shd || alpha == 0.f || !d->palette) {
+        fz_fill_shade(ctx, d->inner, shd, ctm, alpha, color_params);
+        return;
+    }
+    fz_rect bounds = fz_bound_shade(ctx, shd, ctm);
+    fz_rect page = fz_make_rect(d->pageBounds.x, d->pageBounds.y, d->pageBounds.x + d->pageBounds.dx,
+                                d->pageBounds.y + d->pageBounds.dy);
+    bounds = fz_intersect_rect(bounds, page);
+    if (d->clipTop >= 0) {
+        bounds = fz_intersect_rect(bounds, d->clipStack[d->clipTop]);
+    }
+    if (fz_is_empty_rect(bounds)) {
+        return;
+    }
+    float bw = bounds.x1 - bounds.x0;
+    float bh = bounds.y1 - bounds.y0;
+    if (bw < 0.5f || bh < 0.5f) {
+        return;
+    }
+    float scale = 2.f;
+    if (bw * scale > 2048.f) {
+        scale = 2048.f / bw;
+    }
+    if (bh * scale > 2048.f) {
+        scale = 2048.f / bh;
+    }
+    if (scale < 1.f) {
+        scale = 1.f;
+    }
+    int w = (int)(bw * scale + 0.5f);
+    int h = (int)(bh * scale + 0.5f);
+    if (w < 1) {
+        w = 1;
+    }
+    if (h < 1) {
+        h = 1;
+    }
+    if (w > 2048 || h > 2048) {
+        fz_fill_shade(ctx, d->inner, shd, ctm, alpha, color_params);
+        return;
+    }
+
+    fz_pixmap* pix = nullptr;
+    fz_device* shadeDev = nullptr;
+    fz_image* image = nullptr;
+    fz_var(pix);
+    fz_var(shadeDev);
+    fz_var(image);
+    fz_try(ctx) {
+        fz_irect ib = fz_make_irect(0, 0, w, h);
+        pix = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx), ib, nullptr, 1);
+        fz_clear_pixmap_with_value(ctx, pix, 0xff);
+        fz_matrix local = fz_concat(fz_translate(-bounds.x0, -bounds.y0), ctm);
+        local = fz_concat(fz_scale(scale, scale), local);
+        shadeDev = fz_new_draw_device(ctx, local, pix);
+        // Page overprint / DeviceN spots are not available on this temporary
+        // device. Paint the alternate color, then reseat lightness.
+        fz_fill_shade(ctx, shadeDev, shd, fz_identity, alpha, fz_default_color_params);
+        fz_close_device(ctx, shadeDev);
+        fz_drop_device(ctx, shadeDev);
+        shadeDev = nullptr;
+        v2_recolor_shade_pixmap(pix, *d->palette);
+        image = fz_new_image_from_pixmap(ctx, pix, nullptr);
+        fz_drop_pixmap(ctx, pix);
+        pix = nullptr;
+        fz_matrix imageCtm = fz_make_matrix(bw, 0.f, 0.f, bh, bounds.x0, bounds.y0);
+        fz_fill_image(ctx, d->inner, image, imageCtm, 1.f, color_params);
+    }
+    fz_always(ctx) {
+        if (shadeDev) {
+            fz_drop_device(ctx, shadeDev);
+        }
+        if (pix) {
+            fz_drop_pixmap(ctx, pix);
+        }
+        if (image) {
+            fz_drop_image(ctx, image);
+        }
+    }
+    fz_catch(ctx) {
+        logf("shade-recolor failed: %s\n", fz_caught_message(ctx));
+        fz_fill_shade(ctx, d->inner, shd, ctm, alpha, color_params);
+    }
 }
 
 // Manual menu choice. Masked ink plates stay on the automatic path: rebuilding
@@ -638,7 +878,25 @@ static void v2_fill_image(fz_context* ctx, fz_device* dev, fz_image* image, fz_m
         fz_fill_image(ctx, d->inner, image, ctm, alpha, color_params);
         return;
     }
+    struct FillPerf {
+        LARGE_INTEGER t;
+        fz_image* image;
+        float coverage;
+        const char* branch;
+        int cache;
+        FillPerf(fz_image* img) : t(TimeGet()), image(img), coverage(0), branch("?"), cache(0) {
+        }
+        ~FillPerf() {
+            if (!PdfDarkModePagePerfOn() || !image) {
+                return;
+            }
+            logf("page-perf fill %dx%d cov=%.2f branch=%s cache=%d %.1f ms\n", image->w, image->h, coverage, branch,
+                 cache, TimeSinceInMs(t));
+        }
+    } fillPerf(image);
+    fillPerf.coverage = v2_image_coverage(ctm, d->pageBounds);
     if (v2_fill_image_with_strategy(ctx, d, image, ctm, alpha, color_params)) {
+        fillPerf.branch = "strategy";
         return;
     }
     float coverage = v2_image_coverage(ctm, d->pageBounds);
@@ -646,6 +904,7 @@ static void v2_fill_image(fz_context* ctx, fz_device* dev, fz_image* image, fz_m
 
     // Word 红头/标题: 2×2 color + glyph SMask. Must not take the "small photo" path.
     if (v2_image_is_paint_chip(image)) {
+        fillPerf.branch = "chip";
         fz_image* cached = nullptr;
         if (d->engineCache) {
             cached = PdfDarkModeEngineCacheLookupProcessed(ctx, d->engineCache, image, d->profileHash,
@@ -653,6 +912,7 @@ static void v2_fill_image(fz_context* ctx, fz_device* dev, fz_image* image, fz_m
         }
         fz_image* built = nullptr;
         fz_image* draw = cached;
+        fillPerf.cache = cached ? 1 : 0;
         if (!draw) {
             built = v2_build_paint_chip_image(ctx, image, *d->palette);
             draw = built ? built : image;
@@ -682,6 +942,16 @@ static void v2_fill_image(fz_context* ctx, fz_device* dev, fz_image* image, fz_m
     // Small/medium images: knock out JPEG white mats around colorful badges (UNIT / Atlas).
     // Full-page path below handles scans; do not Okular-wash ordinary photos here.
     if (coverage < kV2FullPageCoverage && !largeOffice) {
+        // InDesign/iText textbooks slice one photo into dozens of JPEGs. White-mat
+        // walks every pixel of each slice (and often decodes it twice). That is the
+        // multi-second "Please wait - rendering..." on a TOC jump. These books already
+        // keep picture colors; draw the slice as stored.
+        if (PdfDarkModeEngineCacheLayoutTextbookFastRemap(d->engineCache)) {
+            fillPerf.branch = "layout";
+            fz_fill_image(ctx, d->inner, image, ctm, alpha, color_params);
+            return;
+        }
+        fillPerf.branch = "mat";
         fz_image* cached = nullptr;
         if (d->engineCache) {
             cached = PdfDarkModeEngineCacheLookupProcessed(ctx, d->engineCache, image, d->profileHash,
@@ -689,6 +959,7 @@ static void v2_fill_image(fz_context* ctx, fz_device* dev, fz_image* image, fz_m
         }
         fz_image* built = nullptr;
         fz_image* draw = cached;
+        fillPerf.cache = cached ? 1 : 0;
         if (!draw) {
             built = v2_build_white_mat_image(ctx, image, *d->palette);
             draw = built ? built : image;
@@ -717,6 +988,7 @@ static void v2_fill_image(fz_context* ctx, fz_device* dev, fz_image* image, fz_m
     // MRC text plate: color JPEG + 1-bit ImageMask. Must keep the mask (rebuilding from a
     // pixmap without it paints an opaque dark plate over the page and hides all text).
     if (image->mask) {
+        fillPerf.branch = "mask";
         fz_image* cached = nullptr;
         if (d->engineCache) {
             cached = PdfDarkModeEngineCacheLookupProcessed(ctx, d->engineCache, image, d->profileHash,
@@ -724,6 +996,7 @@ static void v2_fill_image(fz_context* ctx, fz_device* dev, fz_image* image, fz_m
         }
         fz_image* built = nullptr;
         fz_image* draw = cached;
+        fillPerf.cache = cached ? 1 : 0;
         if (!draw) {
             built = v2_build_masked_ink_image(ctx, image, *d->palette);
             draw = built ? built : image;
@@ -750,7 +1023,21 @@ static void v2_fill_image(fz_context* ctx, fz_device* dev, fz_image* image, fz_m
         return;
     }
 
+    // A layout textbook's nearly full-page photo is the same picture as the
+    // slices above. Running it through the full-page picture-book pass walks
+    // every pixel (several seconds in a debug build) even though automatic
+    // mode keeps the photo. Text and office scans still take that pass.
+    if (PdfDarkModeEngineCacheLayoutTextbookFastRemap(d->engineCache)) {
+        DarkImageAnalysis analysis = PdfDarkModeAnalyzeImage(ctx, image, coverage, true);
+        if (!v2_office_scan_may_decode_at_view(analysis)) {
+            fillPerf.branch = "layout";
+            fz_fill_image(ctx, d->inner, image, ctm, alpha, color_params);
+            return;
+        }
+    }
+
     // Full-page raster: remap once and cache (RAZ / scans).
+    fillPerf.branch = "page";
     fz_image* cached = nullptr;
     if (d->engineCache) {
         cached = PdfDarkModeEngineCacheLookupProcessed(ctx, d->engineCache, image, d->profileHash,
@@ -758,6 +1045,7 @@ static void v2_fill_image(fz_context* ctx, fz_device* dev, fz_image* image, fz_m
     }
     fz_image* built = nullptr;
     fz_image* draw = cached;
+    fillPerf.cache = cached ? 1 : 0;
     if (!draw) {
         fz_rect dest = fz_transform_rect(fz_unit_rect, ctm);
         int destW = (int)(fz_abs(dest.x1 - dest.x0) + 0.5f);
@@ -792,40 +1080,46 @@ static void v2_fill_image_mask(fz_context* ctx, fz_device* dev, fz_image* image,
                                fz_color_params color_params) {
     pdf_dark_mode_v2_device* d = (pdf_dark_mode_v2_device*)dev;
     float mapped[FZ_MAX_COLORS] = {};
-    v2_map_paint(ctx, d, colorspace, color, alpha, color_params, mapped);
+    v2_map_paint(ctx, d, colorspace, color, alpha, color_params, mapped, false);
     fz_fill_image_mask(ctx, d->inner, image, ctm, fz_device_rgb(ctx), mapped, alpha, color_params);
 }
 
 static void v2_clip_path(fz_context* ctx, fz_device* dev, const fz_path* path, int even_odd, fz_matrix ctm,
                          fz_rect scissor) {
     pdf_dark_mode_v2_device* d = (pdf_dark_mode_v2_device*)dev;
+    v2_push_clip(d, scissor);
     fz_clip_path(ctx, d->inner, path, even_odd, ctm, scissor);
 }
 
 static void v2_clip_stroke_path(fz_context* ctx, fz_device* dev, const fz_path* path, const fz_stroke_state* stroke,
                                 fz_matrix ctm, fz_rect scissor) {
     pdf_dark_mode_v2_device* d = (pdf_dark_mode_v2_device*)dev;
+    v2_push_clip(d, scissor);
     fz_clip_stroke_path(ctx, d->inner, path, stroke, ctm, scissor);
 }
 
 static void v2_clip_text(fz_context* ctx, fz_device* dev, const fz_text* text, fz_matrix ctm, fz_rect scissor) {
     pdf_dark_mode_v2_device* d = (pdf_dark_mode_v2_device*)dev;
+    v2_push_clip(d, scissor);
     fz_clip_text(ctx, d->inner, text, ctm, scissor);
 }
 
 static void v2_clip_stroke_text(fz_context* ctx, fz_device* dev, const fz_text* text, const fz_stroke_state* stroke,
                                 fz_matrix ctm, fz_rect scissor) {
     pdf_dark_mode_v2_device* d = (pdf_dark_mode_v2_device*)dev;
+    v2_push_clip(d, scissor);
     fz_clip_stroke_text(ctx, d->inner, text, stroke, ctm, scissor);
 }
 
 static void v2_clip_image_mask(fz_context* ctx, fz_device* dev, fz_image* image, fz_matrix ctm, fz_rect scissor) {
     pdf_dark_mode_v2_device* d = (pdf_dark_mode_v2_device*)dev;
+    v2_push_clip(d, scissor);
     fz_clip_image_mask(ctx, d->inner, image, ctm, scissor);
 }
 
 static void v2_pop_clip(fz_context* ctx, fz_device* dev) {
     pdf_dark_mode_v2_device* d = (pdf_dark_mode_v2_device*)dev;
+    v2_pop_clip_rect(d);
     fz_pop_clip(ctx, d->inner);
 }
 
@@ -843,6 +1137,9 @@ static void v2_end_mask(fz_context* ctx, fz_device* dev, fz_function* fn) {
 static void v2_begin_group(fz_context* ctx, fz_device* dev, fz_rect area, fz_colorspace* cs, int isolated, int knockout,
                            int blendmode, float alpha) {
     pdf_dark_mode_v2_device* d = (pdf_dark_mode_v2_device*)dev;
+    if (PdfDarkModePagePerfOn()) {
+        gV2Perf.groupCalls++;
+    }
     fz_begin_group(ctx, d->inner, area, cs, isolated, knockout, blendmode, alpha);
 }
 
@@ -915,6 +1212,9 @@ fz_device* PdfDarkModeWrapV2Device(fz_context* ctx, fz_device* inner, const Dark
     d->pageBounds = pageBounds;
     d->engineCache = engineCache;
     d->profileHash = profileHash;
+    d->clipTop = 0;
+    d->clipExtra = 0;
+    d->clipStack[0] = fz_make_rect(pageBounds.x, pageBounds.y, pageBounds.x + pageBounds.dx, pageBounds.y + pageBounds.dy);
 
     d->super.close_device = v2_close;
     d->super.drop_device = v2_drop;

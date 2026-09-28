@@ -76,6 +76,22 @@ static bool TonePerfRequested() {
     return GetEnvironmentVariableA("SUMATRA_TONE_PERF", nullptr, 0) > 0;
 }
 
+static bool PagePerfRequested() {
+    return GetEnvironmentVariableA("SUMATRA_PAGE_PERF", nullptr, 0) > 0;
+}
+
+static void PagePerfPreparePrefs() {
+    if (!PagePerfRequested() || !gGlobalPrefs) {
+        return;
+    }
+    // Dark theme + automatic document colors + automatic images. Does not write settings.
+    SetTheme("Dark-Dracula");
+    str::ReplaceWithCopy(&gGlobalPrefs->documentColorMode, "theme");
+    str::ReplaceWithCopy(&gGlobalPrefs->documentImageDarkStrategy, "auto");
+    logf("page-perf theme=Dark-Dracula color=%s image=%s\n", gGlobalPrefs->documentColorMode,
+         gGlobalPrefs->documentImageDarkStrategy);
+}
+
 static void TonePerfPreparePrefs() {
     if (!TonePerfRequested() || !gGlobalPrefs) {
         return;
@@ -100,10 +116,10 @@ static void BenchLoadRender(EngineBase* engine, int pagenum) {
     logf("pageload   %3d: %.2f ms\n", pagenum, timeMs);
 
     t = TimeGet();
-    float zoom = TonePerfRequested() ? 1.6f : 1.0f;
+    float zoom = (TonePerfRequested() || PagePerfRequested()) ? 1.6f : 1.0f;
     DarkModeProfile darkProfile;
     RenderPageArgs args(pagenum, zoom, 0);
-    if (TonePerfRequested()) {
+    if (TonePerfRequested() || PagePerfRequested()) {
         BuildViewDarkModeProfile(engine, &darkProfile);
         args.darkProfile = &darkProfile;
         args.target = RenderTarget::View;
@@ -117,7 +133,15 @@ static void BenchLoadRender(EngineBase* engine, int pagenum) {
     delete rendered;
     timeMs = TimeSinceInMs(t);
     logf("pagerender %3d: %.2f ms\n", pagenum, timeMs);
-    if (TonePerfRequested()) {
+    if (PagePerfRequested() && !TonePerfRequested()) {
+        t = TimeGet();
+        RenderPageArgs plain(pagenum, zoom, 0);
+        plain.target = RenderTarget::View;
+        RenderedBitmap* third = engine->RenderPage(plain);
+        delete third;
+        logf("pagerender-plain %3d: %.2f ms\n", pagenum, TimeSinceInMs(t));
+    }
+    if (TonePerfRequested() || PagePerfRequested()) {
         t = TimeGet();
         DarkModeProfile darkProfile2;
         BuildViewDarkModeProfile(engine, &darkProfile2);
@@ -178,6 +202,7 @@ static void BenchFile(const char* path, const char* pagesSpec) {
     }
 
     auto total = TimeGet();
+    PagePerfPreparePrefs();
     TonePerfPreparePrefs();
     logf("Starting: %s\n", path);
 
@@ -194,7 +219,7 @@ static void BenchFile(const char* path, const char* pagesSpec) {
     // benching pages near the end of large books works.
     // Smart-invert timing only needs the first pages. Waiting out an anthology
     // counts every chapter before any picture is graded.
-    if (TonePerfRequested()) {
+    if (TonePerfRequested() || PagePerfRequested()) {
         logf("progressive still loading: %d, pages ready: %d\n", EngineIsProgressiveEbookLoading(engine) ? 1 : 0,
              engine->PageCount());
     } else {

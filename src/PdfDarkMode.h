@@ -270,6 +270,9 @@ DarkImagePolicy PdfDarkModePolicyForFollowThemeImage(const RectF& imgBounds, boo
 
 // OKLab perceptual remap for SmartDark text/vector colors (Phase 2).
 void MapRgbToDarkThemeOklab(float r, float g, float b, const DarkModePalette& palette, float* outRgb);
+// A light marker (yellow highlight bar) drawn under text. Park it darker than the
+// theme text so the inverted glyphs stay readable, and keep the hue visible.
+void MapRgbLightMarkerToDarkTheme(float r, float g, float b, const DarkModePalette& palette, float* outRgb);
 // Highlight shoulder only: compress the bright end, keep hue, do not invert. The Tone
 // strategy does not use this; it reseats lightness onto the theme in OKLab.
 void MapRgbPhotoDarkAdapt(float r, float g, float b, const DarkModePalette& palette, float* outRgb);

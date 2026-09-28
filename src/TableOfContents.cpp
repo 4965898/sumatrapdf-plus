@@ -516,8 +516,6 @@ static bool IsTocPageReachable(DocController* ctrl, TocItem* tocItem) {
     if (engine && engine->kind == kindEngineMupdf && !EngineIsProgressiveEbookLoading(engine)) {
         IPageDestination* dest = tocItem->GetPageDestination();
         int pageNo = EngineMupdfTocItemPageNoForSync(engine, dest, tocItem->pageNo);
-        logf("TOC reachable baked=%d computed=%d pageCount=%d title=%.40s", tocItem->pageNo, pageNo,
-             engine->PageCount(), tocItem->title ? tocItem->title : "");
         if (pageNo > 0) {
             return pageNo <= engine->PageCount();
         }

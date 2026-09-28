@@ -132,6 +132,35 @@ void MapRgbToDarkThemeOklab(float r, float g, float b, const DarkModePalette& pa
     OklabToSrgb(out, &outRgb[0], &outRgb[1], &outRgb[2]);
 }
 
+void MapRgbLightMarkerToDarkTheme(float r, float g, float b, const DarkModePalette& palette, float* outRgb) {
+    OklabColor src = SrgbToOklab(r, g, b);
+    OklabColor text = SrgbToOklab(palette.textR, palette.textG, palette.textB);
+    OklabColor bg = SrgbToOklab(palette.bgR, palette.bgG, palette.bgB);
+    // Far enough below the theme text that light glyphs stay readable, and far
+    // enough above the background that the marker is still a colored band.
+    float outL = bg.L + 0.42f * (text.L - bg.L);
+    if (outL < 0.16f) {
+        outL = 0.16f;
+    }
+    if (outL > 0.55f) {
+        outL = 0.55f;
+    }
+    float chroma = OklabChroma(src);
+    if (chroma > 0.16f) {
+        chroma = 0.16f;
+    }
+    float srcChroma = OklabChroma(src);
+    float outA = 0.f;
+    float outB = 0.f;
+    if (srcChroma > 1e-5f) {
+        float scale = chroma / srcChroma;
+        outA = src.a * scale;
+        outB = src.b * scale;
+    }
+    OklabColor out{outL, outA, outB};
+    OklabToSrgb(out, &outRgb[0], &outRgb[1], &outRgb[2]);
+}
+
 // Only the bright end moves. Below the knee, lightness is unchanged, so shadows are not lifted or flipped.
 // White (L = 1) lands at 0.58. Slope on the shoulder stays positive.
 static float PhotoDarkToneCurve(float L) {
@@ -469,6 +498,134 @@ static bool PointInLandmarkLoop(float x, float y, const DetectedFace& face, cons
     return inside;
 }
 
+struct HullPt {
+    float x;
+    float y;
+};
+
+static float HullCross(HullPt o, HullPt a, HullPt b) {
+    return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+}
+
+// A profile face folds the oval into a self-crossing loop. Even-odd fill then
+// leaves holes, and those pixels stay in the dark grade as black patches.
+static int BuildConvexHull(HullPt* pts, int n, HullPt* hull) {
+    for (int i = 1; i < n; i++) {
+        HullPt key = pts[i];
+        int j = i - 1;
+        while (j >= 0 && (pts[j].x > key.x || (pts[j].x == key.x && pts[j].y > key.y))) {
+            pts[j + 1] = pts[j];
+            j--;
+        }
+        pts[j + 1] = key;
+    }
+    if (n < 3) {
+        for (int i = 0; i < n; i++) {
+            hull[i] = pts[i];
+        }
+        return n;
+    }
+    int h = 0;
+    for (int i = 0; i < n; i++) {
+        while (h >= 2 && HullCross(hull[h - 2], hull[h - 1], pts[i]) <= 0.f) {
+            h--;
+        }
+        hull[h++] = pts[i];
+    }
+    int lower = h + 1;
+    for (int i = n - 2; i >= 0; i--) {
+        while (h >= lower && HullCross(hull[h - 2], hull[h - 1], pts[i]) <= 0.f) {
+            h--;
+        }
+        hull[h++] = pts[i];
+    }
+    if (h > 0) {
+        h--;
+    }
+    return h;
+}
+
+static bool PointInConvex(float x, float y, const HullPt* hull, int n) {
+    if (n < 3) {
+        return false;
+    }
+    for (int i = 0; i < n; i++) {
+        HullPt a = hull[i];
+        HullPt b = hull[(i + 1) % n];
+        float c = (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x);
+        if (c < -0.01f) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void FillConvexLandmarkLoop(float* mask, int w, int h, const DetectedFace& face, const int* idx, int nIdx,
+                                   float scale) {
+    if (nIdx < 3 || nIdx > 80) {
+        return;
+    }
+    HullPt pts[80];
+    float cx = 0.f;
+    float cy = 0.f;
+    for (int i = 0; i < nIdx; i++) {
+        cx += face.landmarks[idx[i]].x;
+        cy += face.landmarks[idx[i]].y;
+    }
+    cx /= (float)nIdx;
+    cy /= (float)nIdx;
+    for (int i = 0; i < nIdx; i++) {
+        pts[i].x = cx + (face.landmarks[idx[i]].x - cx) * scale;
+        pts[i].y = cy + (face.landmarks[idx[i]].y - cy) * scale;
+    }
+    HullPt hull[80];
+    int hn = BuildConvexHull(pts, nIdx, hull);
+    if (hn < 3) {
+        return;
+    }
+    float minX = hull[0].x;
+    float minY = hull[0].y;
+    float maxX = hull[0].x;
+    float maxY = hull[0].y;
+    for (int i = 1; i < hn; i++) {
+        if (hull[i].x < minX) {
+            minX = hull[i].x;
+        }
+        if (hull[i].y < minY) {
+            minY = hull[i].y;
+        }
+        if (hull[i].x > maxX) {
+            maxX = hull[i].x;
+        }
+        if (hull[i].y > maxY) {
+            maxY = hull[i].y;
+        }
+    }
+    int x0 = (int)floorf(minX);
+    int y0 = (int)floorf(minY);
+    int x1 = (int)ceilf(maxX);
+    int y1 = (int)ceilf(maxY);
+    if (x0 < 0) {
+        x0 = 0;
+    }
+    if (y0 < 0) {
+        y0 = 0;
+    }
+    if (x1 >= w) {
+        x1 = w - 1;
+    }
+    if (y1 >= h) {
+        y1 = h - 1;
+    }
+    for (int y = y0; y <= y1; y++) {
+        for (int x = x0; x <= x1; x++) {
+            if (PointInConvex((float)x + 0.5f, (float)y + 0.5f, hull, hn)) {
+                mask[(size_t)y * (size_t)w + (size_t)x] = 1.f;
+            }
+        }
+    }
+}
+
 static void FillLandmarkLoop(float* mask, int w, int h, const DetectedFace& face, const int* idx, int nIdx,
                              float scale) {
     float minX = (float)w;
@@ -551,12 +708,13 @@ static float LoopWidth(const DetectedFace& face, const int* idx, int nIdx) {
 }
 
 static bool FaceOvalUsable(const DetectedFace& face, int w, int h) {
-    if (face.presenceScore < 0.5f) {
-        return false;
-    }
+    // Presence can be low on profile / looking-down heads; the mesh points may
+    // still span a real face. Reject only empty or tiny / off-image loops.
     int outside = 0;
     float minX = 1e9f;
     float maxX = -1e9f;
+    float minY = 1e9f;
+    float maxY = -1e9f;
     for (int i = 0; i < kFaceOvalCount; i++) {
         float x = face.landmarks[kFaceOvalContour[i]].x;
         float y = face.landmarks[kFaceOvalContour[i]].y;
@@ -566,20 +724,77 @@ static bool FaceOvalUsable(const DetectedFace& face, int w, int h) {
         if (x > maxX) {
             maxX = x;
         }
+        if (y < minY) {
+            minY = y;
+        }
+        if (y > maxY) {
+            maxY = y;
+        }
         if (x < -8.f || y < -8.f || x > (float)w + 8.f || y > (float)h + 8.f) {
             outside++;
         }
     }
     float fw = maxX - minX;
-    // A face in a group photo can be a small slice of the frame. Skip only
-    // boxes too small to cover eyes and a mouth.
-    if (fw < 22.f) {
+    float fh = maxY - minY;
+    if (fw < 22.f || fh < 22.f) {
         return false;
     }
     if (outside > kFaceOvalCount / 3) {
         return false;
     }
     return true;
+}
+
+static void FillPaddedLandmarkBounds(float* mask, int w, int h, const DetectedFace& face, const int* idx, int nIdx,
+                                     float padFrac) {
+    if (nIdx < 3) {
+        return;
+    }
+    float minX = 1e9f, maxX = -1e9f, minY = 1e9f, maxY = -1e9f;
+    for (int i = 0; i < nIdx; i++) {
+        float x = face.landmarks[idx[i]].x;
+        float y = face.landmarks[idx[i]].y;
+        if (x < minX) {
+            minX = x;
+        }
+        if (x > maxX) {
+            maxX = x;
+        }
+        if (y < minY) {
+            minY = y;
+        }
+        if (y > maxY) {
+            maxY = y;
+        }
+    }
+    float dx = maxX - minX;
+    float dy = maxY - minY;
+    if (dx < 8.f || dy < 8.f) {
+        return;
+    }
+    float padX = dx * padFrac;
+    float padY = dy * padFrac;
+    int x0 = (int)floorf(minX - padX);
+    int y0 = (int)floorf(minY - padY);
+    int x1 = (int)ceilf(maxX + padX);
+    int y1 = (int)ceilf(maxY + padY);
+    if (x0 < 0) {
+        x0 = 0;
+    }
+    if (y0 < 0) {
+        y0 = 0;
+    }
+    if (x1 >= w) {
+        x1 = w - 1;
+    }
+    if (y1 >= h) {
+        y1 = h - 1;
+    }
+    for (int y = y0; y <= y1; y++) {
+        for (int x = x0; x <= x1; x++) {
+            mask[(size_t)y * (size_t)w + (size_t)x] = 1.f;
+        }
+    }
 }
 
 static void FillFaceEllipse(float* mask, int w, int h, float cx, float cy, float rx, float ry) {
@@ -925,6 +1140,81 @@ static void ClearBackdropFringe(const u8* rgb, int stride, const u8* core, int w
     }
 }
 
+// Center of a painted oval (the yellow reading-guide blob) matches almost
+// every sample. A head the mesh refused still has eyes, hair, and shade.
+static bool EllipseInteriorIsFlatPaint(const u8* rgb, int stride, int w, int h, float cx, float cy, float rx,
+                                       float ry) {
+    if (!rgb || rx < 2.f || ry < 2.f) {
+        return false;
+    }
+    int ccx = (int)(cx + 0.5f);
+    int ccy = (int)(cy + 0.5f);
+    if (ccx < 0 || ccy < 0 || ccx >= w || ccy >= h) {
+        return false;
+    }
+    const u8* center = rgb + (size_t)ccy * (size_t)stride + (size_t)ccx * 3;
+    int cr = center[0];
+    int cg = center[1];
+    int cb = center[2];
+    int stepX = (int)(rx / 6.f);
+    int stepY = (int)(ry / 6.f);
+    if (stepX < 1) {
+        stepX = 1;
+    }
+    if (stepY < 1) {
+        stepY = 1;
+    }
+    int n = 0;
+    int same = 0;
+    int x0 = (int)floorf(cx - rx);
+    int y0 = (int)floorf(cy - ry);
+    int x1 = (int)ceilf(cx + rx);
+    int y1 = (int)ceilf(cy + ry);
+    if (x0 < 0) {
+        x0 = 0;
+    }
+    if (y0 < 0) {
+        y0 = 0;
+    }
+    if (x1 >= w) {
+        x1 = w - 1;
+    }
+    if (y1 >= h) {
+        y1 = h - 1;
+    }
+    for (int y = y0; y <= y1; y += stepY) {
+        for (int x = x0; x <= x1; x += stepX) {
+            float nx = ((float)x + 0.5f - cx) / rx;
+            float ny = ((float)y + 0.5f - cy) / ry;
+            if (nx * nx + ny * ny > 1.f) {
+                continue;
+            }
+            const u8* px = rgb + (size_t)y * (size_t)stride + (size_t)x * 3;
+            int dr = px[0] - cr;
+            int dg = px[1] - cg;
+            int db = px[2] - cb;
+            if (dr < 0) {
+                dr = -dr;
+            }
+            if (dg < 0) {
+                dg = -dg;
+            }
+            if (db < 0) {
+                db = -db;
+            }
+            int d = dr > dg ? dr : dg;
+            if (db > d) {
+                d = db;
+            }
+            if (d <= 30) {
+                same++;
+            }
+            n++;
+        }
+    }
+    return n >= 16 && same * 5 >= n * 4;
+}
+
 static void BuildFaceBlendWeight(const u8* rgb, int w, int h, int stride, const FaceBlendSpec& spec, float* weight) {
     size_t n = (size_t)w * (size_t)h;
     ZeroMask(weight, n);
@@ -941,19 +1231,21 @@ static void BuildFaceBlendWeight(const u8* rgb, int w, int h, int stride, const 
         return;
     }
     for (const DetectedFace& face : faces) {
-        if (face.presenceScore < 0.5f) {
+        if (!FaceOvalUsable(face, w, h)) {
             if (spec.faceBlend <= 0.f || face.bbox.dx < 28.f || face.bbox.dy < 28.f) {
                 continue;
             }
-            ZeroMask(layer, n);
             float cx = face.bbox.x + face.bbox.dx * 0.5f;
-            float cy = face.bbox.y + face.bbox.dy * 0.5f;
-            FillFaceEllipse(layer, w, h, cx, cy, face.bbox.dx * 0.58f, face.bbox.dy * 0.62f);
+            float cy = face.bbox.y + face.bbox.dy * 0.46f;
+            float rx = face.bbox.dx * 0.62f;
+            float ry = face.bbox.dy * 0.70f;
+            if (EllipseInteriorIsFlatPaint(rgb, stride, w, h, cx, cy, rx, ry)) {
+                continue;
+            }
+            ZeroMask(layer, n);
+            FillFaceEllipse(layer, w, h, cx, cy, rx, ry);
             int feather = (int)(face.bbox.dx * 0.12f);
-            MaxBlurred(layer, w, h, feather, spec.faceBlend, weight, face.bbox.dx < 90.f);
-            continue;
-        }
-        if (!FaceOvalUsable(face, w, h)) {
+            MaxBlurred(layer, w, h, feather, spec.faceBlend, weight, true);
             continue;
         }
         float faceW = LoopWidth(face, kFaceOvalContour, kFaceOvalCount);
@@ -976,11 +1268,50 @@ static void BuildFaceBlendWeight(const u8* rgb, int w, int h, int stride, const 
                     maxY = y;
                 }
             }
+            // A yellow reading-guide oval can land a full mesh. Its interior is one
+            // paint color, so do not paste it back as a face.
+            if (EllipseInteriorIsFlatPaint(rgb, stride, w, h, (minX + maxX) * 0.5f, (minY + maxY) * 0.5f,
+                                           (maxX - minX) * 0.42f, (maxY - minY) * 0.42f)) {
+                continue;
+            }
             int bgR = 0, bgG = 0, bgB = 0;
             bool flatBg = SideBackdropIsFlat(rgb, stride, w, h, minX, minY, maxX, maxY, &bgR, &bgG, &bgB);
-            // On a flat backdrop a wide oval eats the wall and the feather turns it into a ring.
-            FillLandmarkLoop(layer, w, h, face, kFaceOvalContour, kFaceOvalCount, flatBg ? 1.0f : 1.08f);
-            int feather = (int)(faceW * 0.08f);
+            // Whole face: padded bounds of oval + eyes + brows, then hull and
+            // apertures on top. A tight oval hull alone left eyes and cheeks out.
+            int facePts[kFaceOvalCount + kNoseSilhouetteCount + 2 * kEyeContourCount + 2 * kBrowContourCount];
+            int nFacePts = 0;
+            for (int i = 0; i < kFaceOvalCount; i++) {
+                facePts[nFacePts++] = kFaceOvalContour[i];
+            }
+            for (int i = 0; i < kNoseSilhouetteCount; i++) {
+                facePts[nFacePts++] = kNoseSilhouette[i];
+            }
+            for (int i = 0; i < kEyeContourCount; i++) {
+                facePts[nFacePts++] = kLeftEyeContour[i];
+                facePts[nFacePts++] = kRightEyeContour[i];
+            }
+            for (int i = 0; i < kBrowContourCount; i++) {
+                facePts[nFacePts++] = kLeftBrowContour[i];
+                facePts[nFacePts++] = kRightBrowContour[i];
+            }
+            FillPaddedLandmarkBounds(layer, w, h, face, facePts, nFacePts, flatBg ? 0.08f : 0.22f);
+            float boxCx = face.bbox.x + face.bbox.dx * 0.5f;
+            float boxCy = face.bbox.y + face.bbox.dy * 0.46f;
+            FillFaceEllipse(layer, w, h, boxCx, boxCy, face.bbox.dx * 0.62f, face.bbox.dy * 0.70f);
+            int silhouette[kFaceOvalCount + kNoseSilhouetteCount];
+            int nSil = 0;
+            for (int i = 0; i < kFaceOvalCount; i++) {
+                silhouette[nSil++] = kFaceOvalContour[i];
+            }
+            for (int i = 0; i < kNoseSilhouetteCount; i++) {
+                silhouette[nSil++] = kNoseSilhouette[i];
+            }
+            FillConvexLandmarkLoop(layer, w, h, face, silhouette, nSil, flatBg ? 1.0f : 1.12f);
+            FillLandmarkLoop(layer, w, h, face, kLeftEyeContour, kEyeContourCount, 1.45f);
+            FillLandmarkLoop(layer, w, h, face, kRightEyeContour, kEyeContourCount, 1.45f);
+            FillLandmarkLoop(layer, w, h, face, kLeftBrowContour, kBrowContourCount, 1.35f);
+            FillLandmarkLoop(layer, w, h, face, kRightBrowContour, kBrowContourCount, 1.35f);
+            int feather = (int)(faceW * 0.10f);
             if (flatBg) {
                 // A wide feather on a flat backdrop paints a pale ring once that backdrop goes dark.
                 feather = (int)(faceW * 0.018f);
@@ -991,8 +1322,7 @@ static void BuildFaceBlendWeight(const u8* rgb, int w, int h, int stride, const 
                     feather = 5;
                 }
             }
-            // A small face is not much wider than the feather, so keep the oval solid.
-            MaxBlurred(layer, w, h, feather, spec.faceBlend, weight, faceW < 90.f);
+            MaxBlurred(layer, w, h, feather, spec.faceBlend, weight, true);
             u8* core = nullptr;
             if (flatBg) {
                 core = (u8*)malloc(n);

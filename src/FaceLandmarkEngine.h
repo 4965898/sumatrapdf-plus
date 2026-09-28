@@ -40,6 +40,11 @@ constexpr int kFaceOvalContour[] = {10,  338, 297, 332, 284, 251, 389, 356, 454,
                                     172, 58,  132, 93,  234, 127, 162, 21,  54,  103, 67,  109};
 constexpr int kFaceOvalCount = 36;
 
+// Nose center line, brow to the tip, then the wings. The face oval does not
+// include these, so a profile hull otherwise runs a straight chord across the nose.
+constexpr int kNoseSilhouette[] = {168, 6, 197, 195, 5, 4, 1, 19, 94, 2, 98, 327};
+constexpr int kNoseSilhouetteCount = 12;
+
 struct FacePoint {
     float x = 0.f;
     float y = 0.f;

@@ -9075,8 +9075,14 @@ RectF EngineMupdf::PageContentBox(int pageNo, RenderTarget target) {
     }
     auto ctx = Ctx();
 
-    FzPageInfo* pageInfo = GetFzPageInfo(pageNo, false);
-    if (!pageInfo) {
+    // Fit Content calls this on the UI thread before the destination page can
+    // paint. A full text extraction plus a cached display list is another
+    // complete page run, and the view renderer does not reuse that list, so a
+    // bookmark jump waited through two extra passes. A bbox device only records
+    // ink bounds (images contribute their rectangle, not decoded pixels).
+    LARGE_INTEGER contentBoxT0 = TimeGet();
+    FzPageInfo* pageInfo = GetFzPageInfo(pageNo, true);
+    if (!pageInfo || !pageInfo->page) {
         // maybe should return a dummy size. not sure how this
         // will play with layout. The page should fail to render
         // since the doc is broken and page is missing
@@ -9084,43 +9090,37 @@ RectF EngineMupdf::PageContentBox(int pageNo, RenderTarget target) {
     }
 
     RectF mediabox = pageInfo->mediabox;
+    if (mediabox.IsEmpty()) {
+        mediabox = ToRectF(fz_bound_page(ctx, pageInfo->page));
+    }
 
-    fz_rect pagerect;
-    fz_display_list* keptList = nullptr;
     bool reflowLoading = InterlockedCompareExchange(&reflowableLoadingInProgress, 0, 0) != 0;
-    {
-        ReflowUiDocLock docGuard(this, reflowLoading);
-        ReflowRenderLock renderGuard(this, reflowLoading);
-        pagerect = fz_bound_page(ctx, pageInfo->page);
-        keptList = GetOrBuildPageDisplayList(pageInfo, ctx);
-    }
-    if (!keptList) {
-        return mediabox;
-    }
-
-    // Lock-free when reflow is done; during progressive reflow replay still hits
-    // the shared fz_store (image decode) and must not run alongside chapter counting.
     fz_cookie fzcookie{};
     fz_rect rect = fz_empty_rect;
     fz_device* dev = nullptr;
     fz_var(dev);
-    ReflowUiDocLock replayGuard(this, reflowLoading);
-    ReflowRenderLock replayRenderGuard(this, reflowLoading);
+    ReflowUiDocLock docGuard(this, reflowLoading);
+    ReflowRenderLock renderGuard(this, reflowLoading);
     fz_try(ctx) {
         dev = fz_new_bbox_device(ctx, &rect);
-        fz_run_display_list(ctx, keptList, dev, fz_identity, pagerect, &fzcookie);
+        fz_run_page(ctx, pageInfo->page, dev, fz_identity, &fzcookie);
         fz_close_device(ctx, dev);
     }
     fz_always(ctx) {
         fz_drop_device(ctx, dev);
-        fz_drop_display_list(ctx, keptList);
     }
     fz_catch(ctx) {
         fz_report_error(ctx);
+        if (PdfDarkModePagePerfOn()) {
+            logf("page-perf content-box page=%d fail %.1f ms\n", pageNo, TimeSinceInMs(contentBoxT0));
+        }
         return mediabox;
     }
+    if (PdfDarkModePagePerfOn()) {
+        logf("page-perf content-box page=%d %.1f ms\n", pageNo, TimeSinceInMs(contentBoxT0));
+    }
 
-    if (fz_is_infinite_rect(rect)) {
+    if (fz_is_infinite_rect(rect) || fz_is_empty_rect(rect)) {
         return mediabox;
     }
 
@@ -10971,6 +10971,20 @@ RenderedBitmap* EngineMupdf::RenderPage(RenderPageArgs& args) {
     if (pageNo < 1) {
         return nullptr;
     }
+    struct PageRenderPerf {
+        int pageNo;
+        float zoom;
+        const char* path;
+        LARGE_INTEGER t;
+        bool on;
+        PageRenderPerf(int p) : pageNo(p), zoom(0), path("none"), t(TimeGet()), on(PdfDarkModePagePerfOn()) {
+        }
+        ~PageRenderPerf() {
+            if (on) {
+                logf("page-perf render page=%d zoom=%.2f path=%s %.1f ms\n", pageNo, zoom, path, TimeSinceInMs(t));
+            }
+        }
+    } pageRenderPerf(pageNo);
     bool reflowLoading = InterlockedCompareExchange(&reflowableLoadingInProgress, 0, 0) != 0;
 
     // GetFzPageInfo() returns a cached fz_page owned by the reflow document.
@@ -11028,12 +11042,18 @@ RenderedBitmap* EngineMupdf::RenderPage(RenderPageArgs& args) {
         fz_set_aa_level(ctx, 0);
     } else {
         // 8 seems to be the default
-        fz_set_aa_level(ctx, 8);
+        int aa = 8;
+        char aaBuf[8] = {};
+        if (PdfDarkModePagePerfOn() && GetEnvironmentVariableA("SUMATRA_PAGE_PERF_AA", aaBuf, sizeof(aaBuf)) > 0) {
+            aa = atoi(aaBuf);
+        }
+        fz_set_aa_level(ctx, aa);
     }
 
     auto pageRect = args.pageRect;
     auto zoom = args.zoom;
     auto rotation = args.rotation;
+    pageRenderPerf.zoom = zoom;
 
     CadMinLineWidthScope cadMinLineWidth(ctx, zoom, CadEnhanceActive(), CadEnhanceUseHairlineBoost());
 
@@ -11081,10 +11101,13 @@ RenderedBitmap* EngineMupdf::RenderPage(RenderPageArgs& args) {
         }
 
         if (useSmartDarkList) {
+            pageRenderPerf.path = "smart-list";
             keptList = GetOrBuildPageDisplayList(pageInfo, ctx);
         } else if ((followDirectPath || followV2Path) && args.darkProfile) {
+            pageRenderPerf.path = "follow-direct";
             bool bitmapRecolor = FollowThemePageShouldRasterizeThenRecolor(this, ctx, pageInfo, page);
             if (bitmapRecolor) {
+                pageRenderPerf.path = "bitmap-list";
                 keptList = GetOrBuildPageDisplayList(pageInfo, ctx);
                 useBitmapTexList = keptList != nullptr;
                 usePageDisplayList = useBitmapTexList;
@@ -11231,6 +11254,7 @@ RenderedBitmap* EngineMupdf::RenderPage(RenderPageArgs& args) {
             // Full-page scan packs (FreePic2Pdf 连环画, DuXiu, …): whole-tile UpdateBitmapColors
             // like main — do not run FollowThemeV2 photo-rect protect (white patchwork on line art).
             if (followV2 && !followBitmapRecolor) {
+                pageRenderPerf.path = "v2";
                 RectF pageBounds = pageInfo->mediabox;
                 if (pageBounds.IsEmpty()) {
                     pageBounds = ToRectF(fz_bound_page(ctx, page));
@@ -11238,6 +11262,7 @@ RenderedBitmap* EngineMupdf::RenderPage(RenderPageArgs& args) {
                 dev = PdfDarkModeWrapV2Device(ctx, baseDev, &darkProfile->palette, pageBounds, darkModeEngineCache,
                                               darkProfile->hash);
             } else if (usedFollowThemeWrap) {
+                pageRenderPerf.path = "wrap";
                 RectF pageBounds = pageInfo->mediabox;
                 if (pageBounds.IsEmpty()) {
                     pageBounds = ToRectF(fz_bound_page(ctx, page));
@@ -11247,13 +11272,22 @@ RenderedBitmap* EngineMupdf::RenderPage(RenderPageArgs& args) {
                 dev = PdfDarkModeWrapFollowThemeDevice(ctx, baseDev, &darkProfile->palette, pageBounds,
                                                        darkModeEngineCache, darkProfile->hash, &followArtworkBounds);
             }
+            LARGE_INTEGER runStart = TimeGet();
             if (hideAnnotations) {
                 pdf_run_page_contents_with_usage(ctx, pdfpage, dev, fz_identity, usage, fzcookie);
                 pdf_run_page_widgets_with_usage(ctx, pdfpage, dev, fz_identity, usage, fzcookie);
             } else {
                 pdf_run_page_with_usage(ctx, pdfpage, dev, fz_identity, usage, fzcookie);
             }
+            double runMs = TimeSinceInMs(runStart);
+            if (followV2 && !followBitmapRecolor) {
+                PdfDarkModeV2FlushPerfLog();
+            }
+            LARGE_INTEGER closeStart = TimeGet();
             fz_close_device(ctx, dev);
+            if (PdfDarkModePagePerfOn()) {
+                logf("page-perf run=%.1f close=%.1f ms\n", runMs, TimeSinceInMs(closeStart));
+            }
             dev = nullptr;
             if (CadEnhanceActive() && cadRasterDominant && pix &&
                 !(darkProfile && DarkModeProfileUsesObjectLevel(darkProfile) && !followBitmapRecolor)) {

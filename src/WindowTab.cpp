@@ -134,7 +134,20 @@ void WindowTab::MoveDocBy(int dx, int dy) const {
         dm->ScrollXBy(dx);
     }
     if (0 != dy) {
+        int yBefore = dm->GetViewPort().y;
         dm->ScrollYBy(dy, false);
+        // Middle-button trackpoint scroll repeats while the stick is held.
+        // When the page already fits, the view does not move; turn the page.
+        if (dm->GetViewPort().y == yBefore && abs(dy) >= abs(dx)) {
+            bool goPrev = dy < 0;
+            DWORD now = GetTickCount();
+            if (now - win->edgePageTurnTick >= 350) {
+                bool turned = goPrev ? dm->GoToPrevPage(true) : dm->GoToNextPage();
+                if (turned) {
+                    win->edgePageTurnTick = now;
+                }
+            }
+        }
     }
 
     if (win && !win->readAloudScrollFromCode) {

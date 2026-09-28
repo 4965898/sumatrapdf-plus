@@ -6,6 +6,8 @@ extern "C" {
 }
 
 #include "utils/BaseUtil.h"
+#include "utils/Log.h"
+#include "utils/Timer.h"
 
 #include "Settings.h"
 #include "GlobalPrefs.h"
@@ -21,6 +23,14 @@ static constexpr int kPreservePdfImagesMinSize = 72;
 static constexpr PdfDarkModeRenderer kPdfDarkModeRenderer = PdfDarkModeRenderer::ObjectLevelDevice;
 
 static bool gPreservePdfImagesInDarkMode = true;
+
+bool PdfDarkModePagePerfOn() {
+    static int on = -1;
+    if (on < 0) {
+        on = GetEnvironmentVariableA("SUMATRA_PAGE_PERF", nullptr, 0) > 0 ? 1 : 0;
+    }
+    return on == 1;
+}
 
 static PdfDocumentColorMode PdfDocumentColorModeFromString(const char* v) {
     if (!v || !*v || str::EqI(v, "auto") || str::EqI(v, "smart")) {
@@ -3469,6 +3479,19 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
     int w = src->w;
     int h = src->h;
     int stride = src->stride;
+    struct V2FullPerf {
+        LARGE_INTEGER t;
+        int w;
+        int h;
+        const char* branch;
+        V2FullPerf(int ww, int hh) : t(TimeGet()), w(ww), h(hh), branch("pixel") {
+        }
+        ~V2FullPerf() {
+            if (PdfDarkModePagePerfOn()) {
+                logf("page-perf v2-full %dx%d branch=%s %.1f ms\n", w, h, branch, TimeSinceInMs(t));
+            }
+        }
+    } v2Perf(w, h);
 
     DmPbPageStats st = dm_pb_estimate_page_stats(ctx, src, cs, rgb, components);
     float paperRatio = st.paperRatio;
@@ -3481,6 +3504,7 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
     bool textPage = paperRatio >= 0.70f && satRatio < 0.08f && lumVar < 0.040f;
     bool lineArtPage = satRatio < 0.06f && chromaRatio < 0.12f && paperRatio >= 0.45f && lumVar < 0.050f;
     if (!textPage && !lineArtPage && lumVar >= 0.018f && paperRatio >= 0.08f) {
+        v2Perf.branch = "picturebook-early";
         return PdfDarkModeProcessPictureBookPixmap(ctx, src, palette, imgAnalysis);
     }
     // Mostly-white text scans with a localized color drawing never reach the photo
@@ -3489,6 +3513,7 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
     // would be ink-remapped (white fox, snow).
     fz_pixmap* island = dm_pb_process_picture_islands(ctx, src, palette);
     if (island) {
+        v2Perf.branch = "islands";
         return island;
     }
 
@@ -3497,6 +3522,7 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
     bool officeScan =
         PdfDarkModeFullResStatsLookLikeOfficeScanForGovPaper(paperRatio, satRatio, chromaRatio, lumVar, redInkRatio);
     if (yellow) {
+        v2Perf.branch = "gov-yellow";
         DarkModePalette lineArtPalette = PdfDarkModeGovernmentPaperPalette(palette);
         return PdfDarkModeProcessGovernmentPaperPixmap(ctx, src, lineArtPalette);
     }
@@ -3535,9 +3561,11 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
         bool insetColor = seekColorInset && nPeek > 0 && largestCov >= 0.04f && largestCov <= 0.55f;
         bool colorArt = PdfDarkModeFullResStatsLookLikeColorIllustrationNotLineArt(satRatio, chromaRatio);
         if (!insetPhoto && !insetGray && !insetColor && !colorArt) {
+            v2Perf.branch = "gov-lineart";
             DarkModePalette lineArtPalette = PdfDarkModeGovernmentPaperPalette(palette);
             return PdfDarkModeProcessGovernmentPaperPixmap(ctx, src, lineArtPalette);
         }
+        v2Perf.branch = "picturebook-lineart";
         return PdfDarkModeProcessPictureBookPixmap(ctx, src, palette, imgAnalysis);
     }
 
@@ -3553,11 +3581,13 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
         textScanBinarize = false;
     }
     if (textScanBinarize) {
+        v2Perf.branch = "gov-text";
         DarkModePalette govPalette = PdfDarkModeGovernmentPaperPalette(palette);
         return PdfDarkModeProcessGovernmentPaperPixmap(ctx, src, govPalette);
     }
 
     if (officeScan) {
+        v2Perf.branch = "gov-office";
         DarkModePalette govPalette = PdfDarkModeGovernmentPaperPalette(palette);
         return PdfDarkModeProcessGovernmentPaperPixmap(ctx, src, govPalette);
     }
@@ -3565,6 +3595,7 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
     // Full-bleed photos: show the original. A gray scene with a few colored
     // subjects fails the high-sat full-bleed gate and was Okular-inverted.
     if (PdfDarkModeV2ShouldKeepOriginalPhotograph(paperRatio, lumVar)) {
+        v2Perf.branch = "keep-original";
         fz_pixmap* dst = fz_new_pixmap(ctx, cs, w, h, src->seps, src->alpha);
         fz_copy_pixmap_rect(ctx, dst, src, fz_make_irect(0, 0, w, h), nullptr);
         return dst;
@@ -3576,6 +3607,7 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
     // Cap paper below 公文 scans (Hangzhou p.2–4: paper≥0.93, JPEG chroma, not cream).
     if (paperRatio >= 0.55f && paperRatio < 0.90f && satRatio < 0.04f && chromaRatio >= 0.12f && chromaRatio < 0.42f &&
         lumVar < 0.055f) {
+        v2Perf.branch = "softcream";
         return PdfDarkModeProcessSoftCreamPixmap(ctx, src, palette);
     }
 
@@ -3587,6 +3619,7 @@ fz_pixmap* PdfDarkModeProcessV2FullPagePixmap(fz_context* ctx, fz_pixmap* src, c
     // Paper-heavy RAZ text pages (Ella Fitzgerald): also PictureBook — Okular on JPEG
     // anti-aliased glyphs leaves hollow speckled outlines.
     if (satRatio >= 0.08f || (paperRatio >= 0.50f && satRatio < 0.15f && lumVar < 0.052f)) {
+        v2Perf.branch = "picturebook";
         return PdfDarkModeProcessPictureBookPixmap(ctx, src, palette, imgAnalysis);
     }
 

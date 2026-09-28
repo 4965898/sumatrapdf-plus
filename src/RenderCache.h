@@ -92,6 +92,9 @@ struct PageRenderRequest {
 
     RectF pageRect; // calculated from TilePosition
     bool abort = false;
+    // Thumbnails may draw a page that is off screen. A view request must not:
+    // that page holds the one render lock, and the page just jumped to waits.
+    bool allowOffscreen = false;
     AbortCookie* abortCookie = nullptr;
     u32 darkModeEpoch = 0;
     DWORD timestamp = 0;
@@ -147,9 +150,9 @@ struct RenderCache {
     RenderCache& operator=(RenderCache const&) = delete;
     ~RenderCache();
 
-    void RequestRendering(DisplayModel* dm, int pageNo);
+    void RequestRendering(DisplayModel* dm, int pageNo, bool prioritize = false);
     void Render(DisplayModel* dm, int pageNo, int rotation, float zoom, RectF pageRect,
-                const Func1<PageRenderRequest*>& callback);
+                const Func1<PageRenderRequest*>& callback, bool allowOffscreen = false);
     void CancelRendering(DisplayModel* dm);
     // Block until no render thread is actively rendering <dm>. Call after
     // CancelRendering before destroying the DisplayModel or its engine.
@@ -178,7 +181,7 @@ struct RenderCache {
     int GetRenderDelay(DisplayModel* dm, int pageNo, TilePosition tile);
     void RequestRendering(DisplayModel* dm, int pageNo, TilePosition tile, bool clearQueueForPage = true);
     bool Render(DisplayModel* dm, int pageNo, int rotation, float zoom, TilePosition* tile, RectF* pageRect,
-                const Func1<PageRenderRequest*>& renderFinishedCb);
+                const Func1<PageRenderRequest*>& renderFinishedCb, bool allowOffscreen = false);
     void ClearQueueForDisplayModel(DisplayModel* dm, int pageNo = kInvalidPageNo, TilePosition* tile = nullptr);
     void AbortCurrentRequest(int threadIdx);
 

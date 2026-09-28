@@ -1119,7 +1119,8 @@ struct ControllerCallbackHandler : DocControllerCallback {
     void PageNoChanged(DocController* ctrl, int pageNo) override;
     void ZoomChanged(DocController* ctrl, float zoomVirtual) override;
     void UpdateScrollbars(Size canvas) override;
-    void RequestRendering(int pageNo) override;
+    void RequestRendering(int pageNo, bool prioritize = false) override;
+    bool IsRenderCached(int pageNo) override;
     void CleanUp(DisplayModel* dm) override;
     void RenderThumbnail(DisplayModel* dm, Size size, const OnBitmapRendered*) override;
     void GotoLink(IPageDestination* dest) override { win->linkHandler->GotoLink(dest); }
@@ -1183,7 +1184,7 @@ void ControllerCallbackHandler::RenderThumbnail(DisplayModel* dm, Size size, con
     auto* td = new ThumbnailRenderData();
     td->saveThumbnail = saveThumbnail;
     auto cb = MkFunc1(ThumbnailRenderFinished, td);
-    gRenderCache->Render(dm, 1, 0, zoom, pageRect, cb);
+    gRenderCache->Render(dm, 1, 0, zoom, pageRect, cb, true);
     engine->disableAntiAlias = savedAntiAlias;
 }
 
@@ -1267,7 +1268,7 @@ static void CreateThumbnailForFile(MainWindow* win, FileState* ds) {
 }
 
 /* Send the request to render a given page to a rendering thread */
-void ControllerCallbackHandler::RequestRendering(int pageNo) {
+void ControllerCallbackHandler::RequestRendering(int pageNo, bool prioritize) {
     if (!win) {
         return;
     }
@@ -1280,8 +1281,19 @@ void ControllerCallbackHandler::RequestRendering(int pageNo) {
     // they'll be rendered directly in DrawDocument during
     // WM_PAINT on the UI thread
     if (dm->ShouldCacheRendering(pageNo)) {
-        gRenderCache->RequestRendering(dm, pageNo);
+        gRenderCache->RequestRendering(dm, pageNo, prioritize);
     }
+}
+
+bool ControllerCallbackHandler::IsRenderCached(int pageNo) {
+    if (!win || !gRenderCache) {
+        return false;
+    }
+    DisplayModel* dm = win->AsFixed();
+    if (!dm) {
+        return false;
+    }
+    return gRenderCache->Exists(dm, pageNo, dm->GetRotation(), dm->GetZoomSafe(pageNo));
 }
 
 void ControllerCallbackHandler::CleanUp(DisplayModel* dm) {

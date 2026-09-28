@@ -450,6 +450,26 @@ const char* scrollMsgStr(USHORT msg) {
     return str::FormatTemp("%d", (int)msg);
 }
 
+// A scroll that cannot move (the page already fits, or the view is at the
+// edge) still has to turn the page. The mouse wheel does this itself.
+// Two-finger swipe and trackpoint-with-middle-button only scroll.
+static void TurnPageAtScrollEdge(MainWindow* win, bool goPrev) {
+    DWORD now = GetTickCount();
+    if (now - win->edgePageTurnTick < 350) {
+        return;
+    }
+    DisplayModel* dm = win->AsFixed();
+    if (!dm) {
+        return;
+    }
+    bool turned = goPrev ? dm->GoToPrevPage(true) : dm->GoToNextPage();
+    if (!turned) {
+        return;
+    }
+    win->edgePageTurnTick = now;
+    ReadAloudOnUserViewChanged(win);
+}
+
 static void OnVScroll(MainWindow* win, WPARAM wp) {
     ReportIf(!win->AsFixed());
 
@@ -577,6 +597,10 @@ static void OnVScroll(MainWindow* win, WPARAM wp) {
             win->AsFixed()->ScrollYTo(si.nPos);
             ReadAloudOnUserViewChanged(win);
         }
+    } else if (msg == SB_LINEUP || msg == SB_PAGEUP || msg == SB_HALF_PAGEUP || msg == SB_TOP) {
+        TurnPageAtScrollEdge(win, true);
+    } else if (msg == SB_LINEDOWN || msg == SB_PAGEDOWN || msg == SB_HALF_PAGEDOWN || msg == SB_BOTTOM) {
+        TurnPageAtScrollEdge(win, false);
     }
 }
 
@@ -3470,7 +3494,13 @@ static LRESULT OnGesture(MainWindow* win, UINT msg, WPARAM wp, LPARAM lp) {
                     // pan / scroll
                     bool canScrollRightBefore = dm->CanScrollRight();
                     bool canScrollLeftBefore = dm->CanScrollLeft();
+                    DWORD tickBefore = win->edgePageTurnTick;
                     win->MoveDocBy(deltaX, deltaY);
+                    // MoveDocBy turns the page when a vertical pan cannot
+                    // scroll. Stop inertia so the new page is not dragged too.
+                    if (deltaY != 0 && win->edgePageTurnTick != tickBefore) {
+                        touchState.panStarted = false;
+                    }
 
                     // if pan to the rigth edge, we want to "sticK" to it
                     // and only flip page on the next flick motion

@@ -224,6 +224,8 @@ inline bool PdfDarkModeV2IsMrcBackgroundGhostPixel(float lum, float chroma) {
     return lum > 0.55f && chroma < 0.32f;
 }
 
+void PdfDarkModeV2FlushPerfLog();
+
 fz_device* PdfDarkModeWrapV2Device(fz_context* ctx, fz_device* inner, const DarkModePalette* palette,
                                    const RectF& pageBounds, DarkModeEngineCache* engineCache = nullptr,
                                    u32 profileHash = 0);

@@ -724,7 +724,36 @@ bool RenderCache::ReduceTileSize() {
     return true;
 }
 
-void RenderCache::RequestRendering(DisplayModel* dm, int pageNo) {
+void RenderCache::RequestRendering(DisplayModel* dm, int pageNo, bool prioritize) {
+    if (prioritize && dm) {
+        // A neighbor prefetch may already be inside RenderPage, holding the
+        // engine lock. Abort it, and drop queued pages that are not this one,
+        // so a bookmark jump is not stuck behind them.
+        ScopedCritSec scope(&requestAccess);
+        for (int i = 0; i < nRenderThreads; i++) {
+            PageRenderRequest* cr = curReqs[i];
+            if (cr && cr->dm == dm && cr->pageNo != pageNo && !cr->abort) {
+                if (cr->abortCookie) {
+                    cr->abortCookie->Abort();
+                }
+                cr->abort = true;
+            }
+        }
+        int reqCount = requestCount;
+        int curPos = 0;
+        for (int i = 0; i < reqCount; i++) {
+            PageRenderRequest* req = &(requests[i]);
+            bool drop = req->dm == dm && req->pageNo != pageNo;
+            if (i != curPos) {
+                requests[curPos] = requests[i];
+            }
+            if (drop) {
+                requestCount--;
+            } else {
+                curPos++;
+            }
+        }
+    }
     TilePosition tile(GetTileRes(dm, pageNo), 0, 0);
     // only honor the request if there's a good chance that the
     // rendered tile will actually be used
@@ -809,8 +838,8 @@ void RenderCache::RequestRendering(DisplayModel* dm, int pageNo, TilePosition ti
 }
 
 void RenderCache::Render(DisplayModel* dm, int pageNo, int rotation, float zoom, RectF pageRect,
-                         const Func1<PageRenderRequest*>& callback) {
-    bool ok = Render(dm, pageNo, rotation, zoom, nullptr, &pageRect, callback);
+                         const Func1<PageRenderRequest*>& callback, bool allowOffscreen) {
+    bool ok = Render(dm, pageNo, rotation, zoom, nullptr, &pageRect, callback, allowOffscreen);
     if (!ok) {
         // create a dummy request to notify callback of failure
         PageRenderRequest req;
@@ -823,7 +852,7 @@ void RenderCache::Render(DisplayModel* dm, int pageNo, int rotation, float zoom,
 }
 
 bool RenderCache::Render(DisplayModel* dm, int pageNo, int rotation, float zoom, TilePosition* tile, RectF* pageRect,
-                         const Func1<PageRenderRequest*>& renderFinishedCb) {
+                         const Func1<PageRenderRequest*>& renderFinishedCb, bool allowOffscreen) {
     logvf("RenderCache::Render: pageNo %d\n", pageNo);
     ReportIf(!dm);
     if (!dm || dm->pauseRendering) {
@@ -869,6 +898,7 @@ bool RenderCache::Render(DisplayModel* dm, int pageNo, int rotation, float zoom,
         CrashMe();
     }
     newRequest->abort = false;
+    newRequest->allowOffscreen = allowOffscreen;
     newRequest->abortCookie = nullptr;
     newRequest->timestamp = GetTickCount();
     newRequest->bmp = nullptr;
@@ -1064,12 +1094,18 @@ static DWORD WINAPI RenderCacheThread(LPVOID data) {
         if (!req.dm) {
             continue;
         }
-        if (!req.dm->PageVisibleNearby(req.pageNo) && !req.renderFinishedCb.IsValid()) {
+        if (!req.allowOffscreen && !req.dm->PageVisibleNearby(req.pageNo)) {
+            // The user already left this page. Don't paint it: it would hold
+            // the engine lock while the page on screen waits.
+            if (req.renderFinishedCb.IsValid()) {
+                req.abort = true;
+                req.renderFinishedCb.Call(&req);
+            }
             continue;
         }
 
-        if (req.dm->pauseRendering) {
-            // aborted due to pause - do nothing
+        if (req.dm->pauseRendering || req.abort) {
+            // aborted due to pause, or a newer visible page replaced this one
             continue;
         }
 
